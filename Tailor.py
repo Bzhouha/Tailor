@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Command-line launcher for the Python implementation of Tailor."""
+"""Top-level launcher for Tailor preprocessing and the C++ solver."""
 
 from src.Python.main import main
 
