@@ -42,13 +42,17 @@ PetscErrorCode Process::run() const {
       "  Ny x Nz: %" PetscInt_FMT " x %" PetscInt_FMT "\n"
       "  alpha: %.16g %+.16gi\n"
       "  FD-q degrees: y=%d, z=%d; DMDA stencil width: %" PetscInt_FMT "\n"
+      "  xi rule: %" PetscInt_FMT " nodes, %" PetscInt_FMT "-point stencil\n"
+      "  eta rule: %" PetscInt_FMT " nodes, %" PetscInt_FMT "-point stencil\n"
       "  ||baseflow||2: %.16g, ||grid||2: %.16g\n",
       recipe.caseTitle.c_str(), recipe.inputFile.c_str(), data.ny, data.nz,
       recipe.alpha.real(), recipe.alpha.imag(), recipe.qY, recipe.qZ,
-      data.stencilWidth, static_cast<double>(baseflowNorm),
-      static_cast<double>(gridNorm)));
+      data.stencilWidth, data.xiRule.nodeCount(), data.xiRule.stencilSize(),
+      data.etaRule.nodeCount(), data.etaRule.stencilSize(),
+      static_cast<double>(baseflowNorm), static_cast<double>(gridNorm)));
 
   // Subsequent stages will be added here in order:
-  // build differentiation operators -> metrics -> A/B assembly -> EPS solve -> output.
+  // build differentiation operators -> metrics -> A/B assembly -> EPS solve ->
+  // output.
   PetscFunctionReturn(PETSC_SUCCESS);
 }

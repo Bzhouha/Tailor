@@ -2,26 +2,8 @@
 
 #include <petscdmda.h>
 
+#include "ProblemData.hpp"
 #include "Recipe.hpp"
-
-struct ProblemData {
-  ProblemData() = default;
-  ~ProblemData();
-
-  ProblemData(const ProblemData &) = delete;
-  ProblemData &operator=(const ProblemData &) = delete;
-
-  PetscErrorCode destroy();
-
-  PetscInt ny = 0;
-  PetscInt nz = 0;
-  PetscInt stencilWidth = 0;
-
-  DM fieldDM = nullptr;
-  DM gridDM = nullptr;
-  Vec baseflow = nullptr;
-  Vec grid = nullptr;
-};
 
 class Prepare {
 public:
@@ -30,11 +12,14 @@ public:
   PetscErrorCode initialize(const Recipe &recipe, ProblemData &data) const;
 
 private:
-  PetscErrorCode readDimensions(PetscViewer viewer, ProblemData &data) const;
+  PetscErrorCode readMetadata(PetscViewer viewer, const Recipe &recipe,
+                              ProblemData &data) const;
   PetscErrorCode createDMs(const Recipe &recipe, ProblemData &data) const;
   PetscErrorCode loadNaturalVector(PetscViewer viewer, DM dm, const char *name,
                                    Vec *global) const;
   PetscErrorCode loadFields(PetscViewer viewer, ProblemData &data) const;
+  PetscErrorCode loadDiscretization(PetscViewer viewer, const Recipe &recipe,
+                                    ProblemData &data) const;
 
   MPI_Comm comm_;
 };
