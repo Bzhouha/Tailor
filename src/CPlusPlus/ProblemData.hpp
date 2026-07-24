@@ -53,8 +53,10 @@ struct ProblemData {
 
   DM fieldDM = nullptr;
   DM gridDM = nullptr;
+  DM metricDM = nullptr;
   Vec baseflow = nullptr;
   Vec grid = nullptr;
+  Vec metrics = nullptr;
 
   // The HDF5 y rule differentiates in computational xi; the z rule in eta.
   FDQRuleData xiRule;

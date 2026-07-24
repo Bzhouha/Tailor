@@ -13,8 +13,10 @@ ProblemData::~ProblemData() { (void)destroy(); }
 
 PetscErrorCode ProblemData::destroy() {
   PetscFunctionBeginUser;
+  PetscCall(VecDestroy(&metrics));
   PetscCall(VecDestroy(&grid));
   PetscCall(VecDestroy(&baseflow));
+  PetscCall(DMDestroy(&metricDM));
   PetscCall(DMDestroy(&gridDM));
   PetscCall(DMDestroy(&fieldDM));
   xiRule.clear();

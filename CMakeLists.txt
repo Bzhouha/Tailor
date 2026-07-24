@@ -77,6 +77,7 @@ endfunction()
 
 add_executable(tailor
     src/CPlusPlus/main.cpp
+    src/CPlusPlus/Metrics.cpp
     src/CPlusPlus/Parser.cpp
     src/CPlusPlus/ProblemData.cpp
     src/CPlusPlus/Prepare.cpp
@@ -119,6 +120,14 @@ if(BUILD_TESTING)
                         --config "${TAILOR_TEST_CONFIG}"
                         --mpiexec "${TAILOR_PETSC_PREFIX}/bin/mpiexec")
             set_tests_properties(tailor_fdq_invalid_inputs
+                PROPERTIES TIMEOUT 180)
+            add_test(NAME tailor_metrics_regression
+                COMMAND "${TAILOR_TEST_PYTHON}"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/tests/CPlusPlus/test_metrics.py"
+                        --solver $<TARGET_FILE:tailor>
+                        --config "${TAILOR_TEST_CONFIG}"
+                        --mpiexec "${TAILOR_PETSC_PREFIX}/bin/mpiexec")
+            set_tests_properties(tailor_metrics_regression
                 PROPERTIES TIMEOUT 180)
         else()
             message(STATUS
