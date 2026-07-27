@@ -77,11 +77,13 @@ endfunction()
 
 add_library(tailor_core STATIC
     src/CPlusPlus/BaseFlowDerivatives.cpp
+    src/CPlusPlus/CurvilinearTransform.cpp
     src/CPlusPlus/LNSCoefficients.cpp
     src/CPlusPlus/Metrics.cpp
     src/CPlusPlus/Parser.cpp
     src/CPlusPlus/ProblemData.cpp
     src/CPlusPlus/Prepare.cpp
+    src/CPlusPlus/StreamwiseFourier.cpp
 )
 target_include_directories(tailor_core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/CPlusPlus"
@@ -139,6 +141,32 @@ if(BUILD_TESTING)
     add_dependencies(test_lns_coefficients tailor_lns_gold)
     tailor_enable_warnings(test_lns_coefficients)
 
+    set(TAILOR_LNS_TRANSFORM_GOLD_GENERATOR
+        "${CMAKE_CURRENT_BINARY_DIR}/generate_lns_transform_gold")
+    set(TAILOR_LNS_TRANSFORM_GOLD_FILE
+        "${CMAKE_CURRENT_BINARY_DIR}/lns_transform_gold.txt")
+    add_custom_command(
+        OUTPUT "${TAILOR_LNS_TRANSFORM_GOLD_FILE}"
+        BYPRODUCTS "${TAILOR_LNS_TRANSFORM_GOLD_GENERATOR}"
+        COMMAND "${TAILOR_GFORTRAN}"
+                -std=f2008 -Wall -Wextra -Werror
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/CPlusPlus/generate_lns_transform_gold.f90"
+                -o "${TAILOR_LNS_TRANSFORM_GOLD_GENERATOR}"
+        COMMAND "${TAILOR_LNS_TRANSFORM_GOLD_GENERATOR}"
+                "${TAILOR_LNS_TRANSFORM_GOLD_FILE}"
+        DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/CPlusPlus/generate_lns_transform_gold.f90"
+        COMMENT "Generating canonical LNS transform fixture from mod_cubes formulas"
+        VERBATIM)
+    add_custom_target(tailor_lns_transform_gold
+        DEPENDS "${TAILOR_LNS_TRANSFORM_GOLD_FILE}")
+
+    add_executable(test_lns_transforms
+        tests/CPlusPlus/test_lns_transforms.cpp)
+    target_link_libraries(test_lns_transforms PRIVATE tailor_core)
+    add_dependencies(test_lns_transforms tailor_lns_transform_gold)
+    tailor_enable_warnings(test_lns_transforms)
+
     if(EXISTS "${TAILOR_TEST_CONFIG}")
         add_test(NAME tailor_smoke_serial
             COMMAND tailor -c "${TAILOR_TEST_CONFIG}")
@@ -154,6 +182,15 @@ if(BUILD_TESTING)
                     $<TARGET_FILE:test_lns_coefficients>
                     -c "${TAILOR_TEST_CONFIG}"
                     -gold "${TAILOR_LNS_GOLD_FILE}")
+        add_test(NAME tailor_lns_transforms_serial
+            COMMAND test_lns_transforms
+                    -c "${TAILOR_TEST_CONFIG}"
+                    -gold "${TAILOR_LNS_TRANSFORM_GOLD_FILE}")
+        add_test(NAME tailor_lns_transforms_mpi_2
+            COMMAND "${TAILOR_PETSC_PREFIX}/bin/mpiexec" -n 2
+                    $<TARGET_FILE:test_lns_transforms>
+                    -c "${TAILOR_TEST_CONFIG}"
+                    -gold "${TAILOR_LNS_TRANSFORM_GOLD_FILE}")
         if(EXISTS "${TAILOR_TEST_PYTHON}")
             add_test(NAME tailor_fdq_invalid_inputs
                 COMMAND "${TAILOR_TEST_PYTHON}"

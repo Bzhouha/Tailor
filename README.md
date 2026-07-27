@@ -15,8 +15,22 @@ Tailor.py
 形状、索引范围和低阶多项式矩。随后程序计算一阶和二阶曲线坐标 metrics，以及
 基本流的 \(y,z,yy,zz,yz\) 导数。物理空间的
 \(\Gamma,A,B,C,D,V_{xx},V_{xy},V_{xz},V_{yy},V_{yz},V_{zz}\)
-节点系数也已按 `mod_cubes.f90` 实现，并可按需即时生成；坐标系数变换、全局矩阵
-组装和特征值求解将在后续阶段继续实现。
+节点系数也已按 `mod_cubes.f90` 实现，并可按需即时生成；全局矩阵组装和特征值
+求解将在后续阶段继续实现。
+
+流向采用 \(q(y,z)e^{i(\alpha x-\omega t)}\) 后，程序按节点生成
+\(K_0,K_y,K_z\)，再利用已有 metrics 变换为
+\(K_\xi,K_\eta,V_{\xi\xi},V_{\xi\eta},V_{\eta\eta}\)。最终空间算子约定为
+
+\[
+Lq=K_0q+K_\xi q_\xi+K_\eta q_\eta
+-V_{\xi\xi}q_{\xi\xi}
+-V_{\eta\eta}q_{\eta\eta}
+-V_{\xi\eta}q_{\xi\eta}.
+\]
+
+这些 \(5\times5\) 系数块不作为全网格数据保存；后续组装全局矩阵时在每个节点
+即时计算。
 
 ## 环境与构建
 
