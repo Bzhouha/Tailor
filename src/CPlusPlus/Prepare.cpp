@@ -1,3 +1,11 @@
+/**
+ * @file Prepare.cpp
+ * @brief Collective HDF5 loading and FD-q schema validation.
+ *
+ * PETSc-formatted complex fields are loaded collectively. Ordinary HDF5 rule
+ * arrays are read through the viewer file identifier on rank zero and then
+ * broadcast to every process.
+ */
 #include "Prepare.hpp"
 
 #include <hdf5.h>

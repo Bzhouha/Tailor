@@ -1,3 +1,7 @@
+/**
+ * @file StreamwiseFourier.hpp
+ * @brief Streamwise Fourier transformation of physical LNS coefficients.
+ */
 #pragma once
 
 #include <petscsys.h>
@@ -7,6 +11,7 @@
 
 #include "LNSCoefficients.hpp"
 
+/** @brief Physical y/z coefficient blocks after substituting d/dx = i alpha. */
 struct FourierLNSCoefficients {
   Block5 Gamma;
   Block5 K0;
@@ -16,6 +21,7 @@ struct FourierLNSCoefficients {
   Block5 Vyz;
   Block5 Vzz;
 
+  /** @brief Test that all seven transformed blocks are finite. */
   [[nodiscard]] bool finite() const noexcept;
 };
 
@@ -24,10 +30,24 @@ inline constexpr std::array<const char *,
                             static_cast<std::size_t>(fourierCoefficientCount)>
     fourierCoefficientNames = {"Gamma", "K0", "Ky", "Kz", "Vyy", "Vyz", "Vzz"};
 
+/**
+ * @brief Apply a prescribed complex streamwise wavenumber pointwise.
+ *
+ * The transformation uses
+ * \f$K_0=D+i\alpha A+\alpha^2V_{xx}\f$,
+ * \f$K_y=B-i\alpha V_{xy}\f$, and
+ * \f$K_z=C-i\alpha V_{xz}\f$.
+ */
 class StreamwiseFourier {
 public:
+  /** @param alpha Complex streamwise wavenumber. */
   explicit StreamwiseFourier(PetscScalar alpha);
 
+  /**
+   * @param physical Physical-space coefficient blocks.
+   * @param fourier Destination Fourier-space blocks.
+   * @return Validation status.
+   */
   [[nodiscard]] CoefficientStatus
   apply(const PhysicalLNSCoefficients &physical,
         FourierLNSCoefficients &fourier) const noexcept;

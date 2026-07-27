@@ -1,3 +1,7 @@
+/**
+ * @file BaseFlowDerivatives.cpp
+ * @brief FD-q and metric-chain-rule implementation for base-flow derivatives.
+ */
 #include "BaseFlowDerivatives.hpp"
 
 #include <petscmath.h>

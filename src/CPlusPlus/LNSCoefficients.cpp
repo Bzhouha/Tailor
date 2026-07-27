@@ -1,3 +1,10 @@
+/**
+ * @file LNSCoefficients.cpp
+ * @brief Physical compressible-LNS blocks with Sutherland transport.
+ *
+ * The formulas are the C++ translation of get_unadorned_cubes from the
+ * canonical START_LNS mod_cubes implementation.
+ */
 #include "LNSCoefficients.hpp"
 
 #include <petscmath.h>

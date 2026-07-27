@@ -1,3 +1,7 @@
+/**
+ * @file Parser.cpp
+ * @brief Rank-zero YAML parsing, physical validation, and MPI broadcast.
+ */
 #include "Parser.hpp"
 
 #include <yaml-cpp/yaml.h>

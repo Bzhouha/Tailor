@@ -1,3 +1,7 @@
+/**
+ * @file CurvilinearTransform.cpp
+ * @brief Pointwise chain-rule implementation for transformed LNS blocks.
+ */
 #include "CurvilinearTransform.hpp"
 
 #include <petscmath.h>

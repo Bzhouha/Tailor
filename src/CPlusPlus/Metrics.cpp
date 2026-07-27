@@ -1,3 +1,7 @@
+/**
+ * @file Metrics.cpp
+ * @brief Distributed computation and validation of curvilinear metrics.
+ */
 #include "Metrics.hpp"
 
 #include <petscmath.h>
@@ -18,7 +22,7 @@ bool inHalfOpenRange(PetscInt value, PetscInt first, PetscInt count) {
 
 PetscReal realPart(PetscScalar value) { return PetscRealPart(value); }
 
-}  // namespace
+} // namespace
 
 Metrics::Metrics(MPI_Comm comm) : comm_(comm) {}
 
@@ -40,8 +44,9 @@ PetscErrorCode Metrics::createStorage(ProblemData &data) const {
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-PetscErrorCode Metrics::computeFirstOrder(
-    ProblemData &data, MetricDiagnostics &diagnostics) const {
+PetscErrorCode
+Metrics::computeFirstOrder(ProblemData &data,
+                           MetricDiagnostics &diagnostics) const {
   Vec gridLocal = nullptr;
   const PetscScalar ***gridArray = nullptr;
   PetscScalar ***metricArray = nullptr;
@@ -64,10 +69,10 @@ PetscErrorCode Metrics::computeFirstOrder(
 
   PetscFunctionBeginUser;
   PetscCall(DMGetLocalVector(data.gridDM, &gridLocal));
-  PetscCall(DMGlobalToLocalBegin(data.gridDM, data.grid, INSERT_VALUES,
-                                 gridLocal));
-  PetscCall(DMGlobalToLocalEnd(data.gridDM, data.grid, INSERT_VALUES,
-                               gridLocal));
+  PetscCall(
+      DMGlobalToLocalBegin(data.gridDM, data.grid, INSERT_VALUES, gridLocal));
+  PetscCall(
+      DMGlobalToLocalEnd(data.gridDM, data.grid, INSERT_VALUES, gridLocal));
   PetscCall(DMDAGetCorners(data.gridDM, &xs, &ys, nullptr, &xm, &ym, nullptr));
   PetscCall(DMDAGetGhostCorners(data.gridDM, &gxs, &gys, nullptr, &gxm, &gym,
                                 nullptr));
@@ -150,12 +155,10 @@ PetscErrorCode Metrics::computeFirstOrder(
       }
 
       const std::array<PetscReal, firstMetricCount> firstMetrics = {
-          zEta / jacobian, -yEta / jacobian, -zXi / jacobian,
-          yXi / jacobian};
-      if (std::any_of(firstMetrics.begin(), firstMetrics.end(),
-                      [](PetscReal value) {
-                        return PetscIsInfOrNanReal(value);
-                      })) {
+          zEta / jacobian, -yEta / jacobian, -zXi / jacobian, yXi / jacobian};
+      if (std::any_of(
+              firstMetrics.begin(), firstMetrics.end(),
+              [](PetscReal value) { return PetscIsInfOrNanReal(value); })) {
         localFailures[1] = 1;
         continue;
       }
@@ -172,13 +175,12 @@ PetscErrorCode Metrics::computeFirstOrder(
   }
 
   PetscCall(DMDAVecRestoreArrayDOF(data.metricDM, data.metrics, &metricArray));
-  PetscCall(
-      DMDAVecRestoreArrayDOFRead(data.gridDM, gridLocal, &gridArray));
+  PetscCall(DMDAVecRestoreArrayDOFRead(data.gridDM, gridLocal, &gridArray));
   PetscCall(DMRestoreLocalVector(data.gridDM, &gridLocal));
 
-  const PetscReal imaginaryTolerance =
-      100.0 * PETSC_MACHINE_EPSILON;
-  if (localMaxImaginary > imaginaryTolerance) localFailures[3] = 1;
+  const PetscReal imaginaryTolerance = 100.0 * PETSC_MACHINE_EPSILON;
+  if (localMaxImaginary > imaginaryTolerance)
+    localFailures[3] = 1;
 
   PetscCallMPI(MPI_Allreduce(localFailures.data(), globalFailures.data(),
                              static_cast<int>(localFailures.size()), MPIU_INT,
@@ -233,10 +235,9 @@ PetscErrorCode Metrics::computeSecondOrder(ProblemData &data) const {
                                metricLocal));
   PetscCall(
       DMDAGetCorners(data.metricDM, &xs, &ys, nullptr, &xm, &ym, nullptr));
-  PetscCall(DMDAGetGhostCorners(data.metricDM, &gxs, &gys, nullptr, &gxm,
-                                &gym, nullptr));
-  PetscCall(
-      DMDAVecGetArrayDOFRead(data.metricDM, metricLocal, &localArray));
+  PetscCall(DMDAGetGhostCorners(data.metricDM, &gxs, &gys, nullptr, &gxm, &gym,
+                                nullptr));
+  PetscCall(DMDAVecGetArrayDOFRead(data.metricDM, metricLocal, &localArray));
   PetscCall(DMDAVecGetArrayDOF(data.metricDM, data.metrics, &globalArray));
 
   for (PetscInt j = ys; j < ys + ym; ++j) {
@@ -252,8 +253,7 @@ PetscErrorCode Metrics::computeSecondOrder(ProblemData &data) const {
           continue;
         }
         const PetscReal weight = data.xiRule.weight(1, i, slot);
-        for (PetscInt component = 0; component < firstMetricCount;
-             ++component)
+        for (PetscInt component = 0; component < firstMetricCount; ++component)
           derivativeXi[static_cast<std::size_t>(component)] +=
               weight * realPart(localArray[j][column][component]);
       }
@@ -265,8 +265,7 @@ PetscErrorCode Metrics::computeSecondOrder(ProblemData &data) const {
           continue;
         }
         const PetscReal weight = data.etaRule.weight(1, j, slot);
-        for (PetscInt component = 0; component < firstMetricCount;
-             ++component)
+        for (PetscInt component = 0; component < firstMetricCount; ++component)
           derivativeEta[static_cast<std::size_t>(component)] +=
               weight * realPart(localArray[row][i][component]);
       }
@@ -304,22 +303,18 @@ PetscErrorCode Metrics::computeSecondOrder(ProblemData &data) const {
           xiZ * derivativeXi[metricIndex(MetricComponent::EtaY)] +
           etaZ * derivativeEta[metricIndex(MetricComponent::EtaY)];
 
-      const std::array<PetscReal, 6> secondMetrics = {
-          xiYY, xiZZ, xiYZ, etaYY, etaZZ, etaYZ};
-      if (std::any_of(secondMetrics.begin(), secondMetrics.end(),
-                      [](PetscReal value) {
-                        return PetscIsInfOrNanReal(value);
-                      })) {
+      const std::array<PetscReal, 6> secondMetrics = {xiYY,  xiZZ,  xiYZ,
+                                                      etaYY, etaZZ, etaYZ};
+      if (std::any_of(
+              secondMetrics.begin(), secondMetrics.end(),
+              [](PetscReal value) { return PetscIsInfOrNanReal(value); })) {
         localFailures[1] = 1;
         continue;
       }
 
-      globalArray[j][i][metricIndex(MetricComponent::XiYY)] =
-          PetscScalar(xiYY);
-      globalArray[j][i][metricIndex(MetricComponent::XiZZ)] =
-          PetscScalar(xiZZ);
-      globalArray[j][i][metricIndex(MetricComponent::XiYZ)] =
-          PetscScalar(xiYZ);
+      globalArray[j][i][metricIndex(MetricComponent::XiYY)] = PetscScalar(xiYY);
+      globalArray[j][i][metricIndex(MetricComponent::XiZZ)] = PetscScalar(xiZZ);
+      globalArray[j][i][metricIndex(MetricComponent::XiYZ)] = PetscScalar(xiYZ);
       globalArray[j][i][metricIndex(MetricComponent::EtaYY)] =
           PetscScalar(etaYY);
       globalArray[j][i][metricIndex(MetricComponent::EtaZZ)] =
@@ -344,13 +339,13 @@ PetscErrorCode Metrics::computeSecondOrder(ProblemData &data) const {
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-PetscErrorCode Metrics::computeNorms(
-    const ProblemData &data, MetricDiagnostics &diagnostics) const {
+PetscErrorCode Metrics::computeNorms(const ProblemData &data,
+                                     MetricDiagnostics &diagnostics) const {
   PetscFunctionBeginUser;
   for (PetscInt component = 0; component < metricComponentCount; ++component)
-    PetscCall(VecStrideNorm(
-        data.metrics, component, NORM_2,
-        &diagnostics.norms[static_cast<std::size_t>(component)]));
+    PetscCall(
+        VecStrideNorm(data.metrics, component, NORM_2,
+                      &diagnostics.norms[static_cast<std::size_t>(component)]));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 

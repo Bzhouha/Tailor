@@ -1,3 +1,7 @@
+/**
+ * @file ProblemData.cpp
+ * @brief Resource cleanup for persistent problem data.
+ */
 #include "ProblemData.hpp"
 
 void FDQRuleData::clear() noexcept {

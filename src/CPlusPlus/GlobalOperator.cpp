@@ -1,3 +1,11 @@
+/**
+ * @file GlobalOperator.cpp
+ * @brief Compact MPIBAIJ preallocation and unconstrained operator assembly.
+ *
+ * The spatial sparsity is the Cartesian product of the one-dimensional FD-q
+ * stencils. Diagonal/off-diagonal block counts are computed in PETSc ordering
+ * before any values are inserted.
+ */
 #include "GlobalOperator.hpp"
 
 #include <algorithm>

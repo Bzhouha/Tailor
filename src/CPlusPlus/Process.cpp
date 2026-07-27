@@ -1,3 +1,7 @@
+/**
+ * @file Process.cpp
+ * @brief Collective execution order and user-facing preparation diagnostics.
+ */
 #include "Process.hpp"
 
 #include <array>

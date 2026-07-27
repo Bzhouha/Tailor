@@ -1,3 +1,7 @@
+/**
+ * @file StreamwiseFourier.cpp
+ * @brief Pointwise substitution of the streamwise Fourier ansatz.
+ */
 #include "StreamwiseFourier.hpp"
 
 #include <petscmath.h>
