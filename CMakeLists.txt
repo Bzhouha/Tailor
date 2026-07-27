@@ -75,21 +75,28 @@ function(tailor_enable_warnings target)
         $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-Wall;-Wextra;-Wpedantic>)
 endfunction()
 
-add_executable(tailor
-    src/CPlusPlus/main.cpp
+add_library(tailor_core STATIC
+    src/CPlusPlus/BaseFlowDerivatives.cpp
+    src/CPlusPlus/LNSCoefficients.cpp
     src/CPlusPlus/Metrics.cpp
     src/CPlusPlus/Parser.cpp
     src/CPlusPlus/ProblemData.cpp
     src/CPlusPlus/Prepare.cpp
-    src/CPlusPlus/Process.cpp
 )
-target_include_directories(tailor PRIVATE
+target_include_directories(tailor_core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/CPlusPlus"
     "${TAILOR_PETSC_PREFIX}/include")
-target_link_libraries(tailor PRIVATE
+target_link_libraries(tailor_core PUBLIC
     PkgConfig::SLEPC
     yaml-cpp::yaml-cpp
     "${TAILOR_PETSC_HDF5_LIBRARY}")
+tailor_enable_warnings(tailor_core)
+
+add_executable(tailor
+    src/CPlusPlus/main.cpp
+    src/CPlusPlus/Process.cpp
+)
+target_link_libraries(tailor PRIVATE tailor_core)
 tailor_enable_warnings(tailor)
 
 if(TAILOR_BUILD_TOOLS)
@@ -106,12 +113,47 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    find_program(TAILOR_GFORTRAN NAMES gfortran REQUIRED)
+    set(TAILOR_LNS_GOLD_GENERATOR
+        "${CMAKE_CURRENT_BINARY_DIR}/generate_lns_coefficients_gold")
+    set(TAILOR_LNS_GOLD_FILE
+        "${CMAKE_CURRENT_BINARY_DIR}/lns_coefficients_gold.txt")
+    add_custom_command(
+        OUTPUT "${TAILOR_LNS_GOLD_FILE}"
+        BYPRODUCTS "${TAILOR_LNS_GOLD_GENERATOR}"
+        COMMAND "${TAILOR_GFORTRAN}"
+                -std=f2008 -Wall -Wextra -Werror
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/CPlusPlus/generate_lns_coefficients_gold.f90"
+                -o "${TAILOR_LNS_GOLD_GENERATOR}"
+        COMMAND "${TAILOR_LNS_GOLD_GENERATOR}" "${TAILOR_LNS_GOLD_FILE}"
+        DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/CPlusPlus/generate_lns_coefficients_gold.f90"
+        COMMENT "Generating canonical LNS coefficient fixture from mod_cubes formulas"
+        VERBATIM)
+    add_custom_target(tailor_lns_gold
+        DEPENDS "${TAILOR_LNS_GOLD_FILE}")
+
+    add_executable(test_lns_coefficients
+        tests/CPlusPlus/test_lns_coefficients.cpp)
+    target_link_libraries(test_lns_coefficients PRIVATE tailor_core)
+    add_dependencies(test_lns_coefficients tailor_lns_gold)
+    tailor_enable_warnings(test_lns_coefficients)
+
     if(EXISTS "${TAILOR_TEST_CONFIG}")
         add_test(NAME tailor_smoke_serial
             COMMAND tailor -c "${TAILOR_TEST_CONFIG}")
         add_test(NAME tailor_smoke_mpi_2
             COMMAND "${TAILOR_PETSC_PREFIX}/bin/mpiexec" -n 2
                     $<TARGET_FILE:tailor> -c "${TAILOR_TEST_CONFIG}")
+        add_test(NAME tailor_lns_coefficients_serial
+            COMMAND test_lns_coefficients
+                    -c "${TAILOR_TEST_CONFIG}"
+                    -gold "${TAILOR_LNS_GOLD_FILE}")
+        add_test(NAME tailor_lns_coefficients_mpi_2
+            COMMAND "${TAILOR_PETSC_PREFIX}/bin/mpiexec" -n 2
+                    $<TARGET_FILE:test_lns_coefficients>
+                    -c "${TAILOR_TEST_CONFIG}"
+                    -gold "${TAILOR_LNS_GOLD_FILE}")
         if(EXISTS "${TAILOR_TEST_PYTHON}")
             add_test(NAME tailor_fdq_invalid_inputs
                 COMMAND "${TAILOR_TEST_PYTHON}"
@@ -128,6 +170,22 @@ if(BUILD_TESTING)
                         --config "${TAILOR_TEST_CONFIG}"
                         --mpiexec "${TAILOR_PETSC_PREFIX}/bin/mpiexec")
             set_tests_properties(tailor_metrics_regression
+                PROPERTIES TIMEOUT 180)
+            add_test(NAME tailor_baseflow_derivatives
+                COMMAND "${TAILOR_TEST_PYTHON}"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/tests/CPlusPlus/test_baseflow_derivatives.py"
+                        --solver $<TARGET_FILE:tailor>
+                        --config "${TAILOR_TEST_CONFIG}"
+                        --mpiexec "${TAILOR_PETSC_PREFIX}/bin/mpiexec")
+            set_tests_properties(tailor_baseflow_derivatives
+                PROPERTIES TIMEOUT 180)
+            add_test(NAME tailor_physics_config
+                COMMAND "${TAILOR_TEST_PYTHON}"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/tests/CPlusPlus/test_physics_config.py"
+                        --solver $<TARGET_FILE:tailor>
+                        --config "${TAILOR_TEST_CONFIG}"
+                        --mpiexec "${TAILOR_PETSC_PREFIX}/bin/mpiexec")
+            set_tests_properties(tailor_physics_config
                 PROPERTIES TIMEOUT 180)
         else()
             message(STATUS

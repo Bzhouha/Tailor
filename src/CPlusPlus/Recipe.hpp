@@ -7,7 +7,6 @@ struct Recipe {
   std::string caseTitle;
   std::string sourceFile;
   std::string inputFile;
-  std::string transportModel;
 
   int qY = 0;
   int qZ = 0;

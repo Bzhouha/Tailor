@@ -2,6 +2,7 @@
 
 #include <array>
 
+#include "BaseFlowDerivatives.hpp"
 #include "Metrics.hpp"
 #include "Parser.hpp"
 #include "Prepare.hpp"
@@ -27,6 +28,7 @@ PetscErrorCode Process::run() const {
   Recipe recipe;
   ProblemData data;
   MetricDiagnostics metricDiagnostics;
+  BaseFlowDerivativeDiagnostics derivativeDiagnostics;
   PetscReal baseflowNorm = 0.0;
   PetscReal gridNorm = 0.0;
 
@@ -35,6 +37,7 @@ PetscErrorCode Process::run() const {
   PetscCall(Parser(comm_).parse(configPath, recipe));
   PetscCall(Prepare(comm_).initialize(recipe, data));
   PetscCall(Metrics(comm_).compute(data, metricDiagnostics));
+  PetscCall(BaseFlowDerivatives(comm_).compute(data, derivativeDiagnostics));
 
   PetscCall(VecNorm(data.baseflow, NORM_2, &baseflowNorm));
   PetscCall(VecNorm(data.grid, NORM_2, &gridNorm));
@@ -66,7 +69,36 @@ PetscErrorCode Process::run() const {
         static_cast<double>(
             metricDiagnostics.norms[static_cast<std::size_t>(component)])));
 
+  PetscCall(PetscPrintf(
+      comm_,
+      "  base-flow derivative components: %" PetscInt_FMT
+      "; max |Im(baseflow)|: %.16g\n",
+      baseFlowDerivativeComponentCount,
+      static_cast<double>(derivativeDiagnostics.maxBaseFlowImaginary)));
+  for (PetscInt derivative = 0; derivative < baseFlowDerivativeKindCount;
+       ++derivative) {
+    PetscCall(PetscPrintf(
+        comm_,
+        "  base-flow derivative norm %s: %.16g %.16g %.16g %.16g %.16g\n",
+        baseFlowDerivativeNames[static_cast<std::size_t>(derivative)],
+        static_cast<double>(
+            derivativeDiagnostics.norms[static_cast<std::size_t>(
+                derivative * flowComponentCount)]),
+        static_cast<double>(
+            derivativeDiagnostics.norms[static_cast<std::size_t>(
+                derivative * flowComponentCount + 1)]),
+        static_cast<double>(
+            derivativeDiagnostics.norms[static_cast<std::size_t>(
+                derivative * flowComponentCount + 2)]),
+        static_cast<double>(
+            derivativeDiagnostics.norms[static_cast<std::size_t>(
+                derivative * flowComponentCount + 3)]),
+        static_cast<double>(
+            derivativeDiagnostics.norms[static_cast<std::size_t>(
+                derivative * flowComponentCount + 4)])));
+  }
+
   // Subsequent stages will be added here in order:
-  // A/B assembly -> EPS solve -> output.
+  // transformed coefficients -> global matrices -> EPS solve -> output.
   PetscFunctionReturn(PETSC_SUCCESS);
 }

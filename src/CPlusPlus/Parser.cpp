@@ -11,10 +11,10 @@
 
 namespace {
 
-template <typename T>
-T required(const YAML::Node &node, const char *key) {
+template <typename T> T required(const YAML::Node &node, const char *key) {
   const YAML::Node value = node[key];
-  if (!value) throw std::runtime_error(std::string("Missing YAML key: ") + key);
+  if (!value)
+    throw std::runtime_error(std::string("Missing YAML key: ") + key);
   return value.as<T>();
 }
 
@@ -24,7 +24,7 @@ void requireFinite(double value, const char *name) {
   }
 }
 
-}  // namespace
+} // namespace
 
 Parser::Parser(MPI_Comm comm) : comm_(comm) {}
 
@@ -47,16 +47,17 @@ Recipe Parser::parseOnRoot(const std::string &yamlConfig) {
   const std::filesystem::path source =
       file.is_absolute() ? file : configPath.parent_path() / folder / file;
   const std::filesystem::path normalizedSource = source.lexically_normal();
-  const std::string cacheName =
-      "fdq_" + normalizedSource.stem().string() + "_qy" +
-      std::to_string(recipe.qY) + "_qz" + std::to_string(recipe.qZ) + ".h5";
+  const std::string cacheName = "fdq_" + normalizedSource.stem().string() +
+                                "_qy" + std::to_string(recipe.qY) + "_qz" +
+                                std::to_string(recipe.qZ) + ".h5";
   const std::filesystem::path input =
       normalizedSource.parent_path() / "FD-q" / cacheName;
   recipe.sourceFile = normalizedSource.string();
   recipe.inputFile = input.lexically_normal().string();
 
   const YAML::Node alpha = root["Stability"]["Alpha"];
-  if (!alpha) throw std::runtime_error("Missing YAML key: Stability.Alpha");
+  if (!alpha)
+    throw std::runtime_error("Missing YAML key: Stability.Alpha");
   recipe.alpha = {required<double>(alpha, "Real"),
                   required<double>(alpha, "Imag")};
 
@@ -69,12 +70,10 @@ Recipe Parser::parseOnRoot(const std::string &yamlConfig) {
   recipe.prandtl = required<double>(gas, "PrandtlNumber");
   recipe.gasConstant = required<double>(gas, "GasConstant");
   recipe.ratioOfSpecificHeats = required<double>(gas, "RatioOfSpecificHeats");
-  recipe.transportModel = required<std::string>(transport, "Model");
   recipe.referenceViscosity = required<double>(transport, "ReferenceMu");
   recipe.referenceTemperature =
       required<double>(transport, "ReferenceTemperature");
-  recipe.sutherlandConstant =
-      required<double>(transport, "SutherlandConstant");
+  recipe.sutherlandConstant = required<double>(transport, "SutherlandConstant");
 
   if (recipe.qY < 2 || recipe.qZ < 2) {
     throw std::runtime_error("Q-Value.y and Q-Value.z must both be at least 2");
@@ -95,10 +94,12 @@ Recipe Parser::parseOnRoot(const std::string &yamlConfig) {
   requireFinite(recipe.referenceTemperature, "ReferenceTemperature");
   requireFinite(recipe.sutherlandConstant, "SutherlandConstant");
 
-  if (recipe.reynolds <= 0.0 || recipe.mach < 0.0 || recipe.prandtl <= 0.0 ||
+  if (recipe.reynolds <= 0.0 || recipe.mach <= 0.0 || recipe.prandtl <= 0.0 ||
       recipe.gasConstant <= 0.0 || recipe.ratioOfSpecificHeats <= 1.0 ||
-      recipe.referenceViscosity <= 0.0 || recipe.referenceTemperature <= 0.0) {
-    throw std::runtime_error("The physical parameters in config.yaml are outside their valid ranges");
+      recipe.referenceViscosity <= 0.0 || recipe.referenceTemperature <= 0.0 ||
+      recipe.sutherlandConstant < 0.0) {
+    throw std::runtime_error("The physical parameters in config.yaml are "
+                             "outside their valid ranges");
   }
 
   return recipe;
@@ -111,12 +112,14 @@ PetscErrorCode Parser::broadcastString(std::string &value) const {
   PetscFunctionBeginUser;
   PetscCallMPI(MPI_Comm_rank(comm_, &rank));
   if (rank == 0) {
-    PetscCheck(value.size() <= static_cast<std::size_t>(std::numeric_limits<PetscMPIInt>::max()),
+    PetscCheck(value.size() <= static_cast<std::size_t>(
+                                   std::numeric_limits<PetscMPIInt>::max()),
                comm_, PETSC_ERR_ARG_SIZ, "String is too long to broadcast");
     length = static_cast<PetscMPIInt>(value.size());
   }
   PetscCallMPI(MPI_Bcast(&length, 1, MPI_INT, 0, comm_));
-  if (rank != 0) value.resize(static_cast<std::size_t>(length));
+  if (rank != 0)
+    value.resize(static_cast<std::size_t>(length));
   if (length > 0) {
     PetscCallMPI(MPI_Bcast(value.data(), length, MPI_CHAR, 0, comm_));
   }
@@ -144,12 +147,12 @@ PetscErrorCode Parser::broadcast(Recipe &recipe) const {
   PetscCallMPI(MPI_Bcast(values.data(), static_cast<PetscMPIInt>(values.size()),
                          MPI_DOUBLE, 0, comm_));
   std::array<int, 2> qValues{recipe.qY, recipe.qZ};
-  PetscCallMPI(MPI_Bcast(qValues.data(), static_cast<PetscMPIInt>(qValues.size()),
-                         MPI_INT, 0, comm_));
+  PetscCallMPI(MPI_Bcast(qValues.data(),
+                         static_cast<PetscMPIInt>(qValues.size()), MPI_INT, 0,
+                         comm_));
   PetscCall(broadcastString(recipe.caseTitle));
   PetscCall(broadcastString(recipe.sourceFile));
   PetscCall(broadcastString(recipe.inputFile));
-  PetscCall(broadcastString(recipe.transportModel));
 
   if (rank != 0) {
     recipe.qY = qValues[0];
@@ -167,7 +170,8 @@ PetscErrorCode Parser::broadcast(Recipe &recipe) const {
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-PetscErrorCode Parser::parse(const std::string &yamlConfig, Recipe &recipe) const {
+PetscErrorCode Parser::parse(const std::string &yamlConfig,
+                             Recipe &recipe) const {
   PetscMPIInt rank = 0;
   PetscMPIInt parsed = 1;
   std::string errorMessage;
@@ -185,8 +189,8 @@ PetscErrorCode Parser::parse(const std::string &yamlConfig, Recipe &recipe) cons
 
   PetscCallMPI(MPI_Bcast(&parsed, 1, MPI_INT, 0, comm_));
   PetscCall(broadcastString(errorMessage));
-  PetscCheck(parsed, comm_, PETSC_ERR_FILE_UNEXPECTED,
-             "Failed to parse %s: %s", yamlConfig.c_str(), errorMessage.c_str());
+  PetscCheck(parsed, comm_, PETSC_ERR_FILE_UNEXPECTED, "Failed to parse %s: %s",
+             yamlConfig.c_str(), errorMessage.c_str());
   PetscCall(broadcast(recipe));
   PetscFunctionReturn(PETSC_SUCCESS);
 }

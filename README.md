@@ -12,8 +12,11 @@ Tailor.py
 
 目前 C++ 阶段已经能够并行加载网格和基流、建立 DMDA，并读取 FD-q 两个方向的
 计算节点、stencil 索引以及零至二阶微分权重。加载阶段会校验 HDF5 schema、数组
-形状、索引范围和低阶多项式矩。随后程序通过两次 DMDA Ghost 同步计算一阶和二阶
-曲线坐标 metrics，并检查 Jacobian；矩阵组装和特征值求解将在后续阶段继续实现。
+形状、索引范围和低阶多项式矩。随后程序计算一阶和二阶曲线坐标 metrics，以及
+基本流的 \(y,z,yy,zz,yz\) 导数。物理空间的
+\(\Gamma,A,B,C,D,V_{xx},V_{xy},V_{xz},V_{yy},V_{yz},V_{zz}\)
+节点系数也已按 `mod_cubes.f90` 实现，并可按需即时生成；坐标系数变换、全局矩阵
+组装和特征值求解将在后续阶段继续实现。
 
 ## 环境与构建
 
@@ -55,6 +58,9 @@ Q-Value:
 输入：data/sample.h5
 输出：data/FD-q/fdq_sample_qy10_qz6.h5
 ```
+
+输运模型固定采用 Sutherland 定律，因此配置中不需要 `Physics.Transport.Model`；
+仍需提供 `ReferenceMu`、`ReferenceTemperature` 和 `SutherlandConstant`。
 
 ## 完整运行
 
@@ -124,7 +130,8 @@ python Tailor.py -c config.yaml -n 2 --mpiexec /path/to/mpiexec
 python -m unittest discover -s tests/Python -v
 ```
 
-运行 CMake/CTest 测试：
+运行 CMake/CTest 测试（测试构建需要 `gfortran`，用于从规范 Fortran 公式生成
+LNS 系数黄金数据；测试运行本身不调用 Fortran）：
 
 ```bash
 ctest --test-dir build --output-on-failure
