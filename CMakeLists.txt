@@ -78,6 +78,7 @@ endfunction()
 add_library(tailor_core STATIC
     src/CPlusPlus/BaseFlowDerivatives.cpp
     src/CPlusPlus/CurvilinearTransform.cpp
+    src/CPlusPlus/GlobalOperator.cpp
     src/CPlusPlus/LNSCoefficients.cpp
     src/CPlusPlus/Metrics.cpp
     src/CPlusPlus/Parser.cpp
@@ -167,6 +168,11 @@ if(BUILD_TESTING)
     add_dependencies(test_lns_transforms tailor_lns_transform_gold)
     tailor_enable_warnings(test_lns_transforms)
 
+    add_executable(test_global_operator
+        tests/CPlusPlus/test_global_operator.cpp)
+    target_link_libraries(test_global_operator PRIVATE tailor_core)
+    tailor_enable_warnings(test_global_operator)
+
     if(EXISTS "${TAILOR_TEST_CONFIG}")
         add_test(NAME tailor_smoke_serial
             COMMAND tailor -c "${TAILOR_TEST_CONFIG}")
@@ -191,6 +197,13 @@ if(BUILD_TESTING)
                     $<TARGET_FILE:test_lns_transforms>
                     -c "${TAILOR_TEST_CONFIG}"
                     -gold "${TAILOR_LNS_TRANSFORM_GOLD_FILE}")
+        add_test(NAME tailor_global_operator_serial
+            COMMAND test_global_operator
+                    -c "${TAILOR_TEST_CONFIG}")
+        add_test(NAME tailor_global_operator_mpi_2
+            COMMAND "${TAILOR_PETSC_PREFIX}/bin/mpiexec" -n 2
+                    $<TARGET_FILE:test_global_operator>
+                    -c "${TAILOR_TEST_CONFIG}")
         if(EXISTS "${TAILOR_TEST_PYTHON}")
             add_test(NAME tailor_fdq_invalid_inputs
                 COMMAND "${TAILOR_TEST_PYTHON}"

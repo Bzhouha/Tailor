@@ -1,6 +1,7 @@
 #pragma once
 
 #include <petscdmda.h>
+#include <petscmat.h>
 
 #include <array>
 #include <cstddef>
@@ -59,6 +60,8 @@ struct ProblemData {
   Vec grid = nullptr;
   Vec metrics = nullptr;
   Vec baseflowDerivatives = nullptr;
+  Mat massMatrix = nullptr;
+  Mat spatialMatrix = nullptr;
 
   // The HDF5 y rule differentiates in computational xi; the z rule in eta.
   FDQRuleData xiRule;

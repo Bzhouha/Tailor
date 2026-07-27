@@ -13,6 +13,8 @@ ProblemData::~ProblemData() { (void)destroy(); }
 
 PetscErrorCode ProblemData::destroy() {
   PetscFunctionBeginUser;
+  PetscCall(MatDestroy(&spatialMatrix));
+  PetscCall(MatDestroy(&massMatrix));
   PetscCall(VecDestroy(&baseflowDerivatives));
   PetscCall(VecDestroy(&metrics));
   PetscCall(VecDestroy(&grid));

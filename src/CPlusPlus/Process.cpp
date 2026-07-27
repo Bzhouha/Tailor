@@ -3,6 +3,7 @@
 #include <array>
 
 #include "BaseFlowDerivatives.hpp"
+#include "GlobalOperator.hpp"
 #include "Metrics.hpp"
 #include "Parser.hpp"
 #include "Prepare.hpp"
@@ -29,6 +30,7 @@ PetscErrorCode Process::run() const {
   ProblemData data;
   MetricDiagnostics metricDiagnostics;
   BaseFlowDerivativeDiagnostics derivativeDiagnostics;
+  GlobalOperatorDiagnostics operatorDiagnostics;
   PetscReal baseflowNorm = 0.0;
   PetscReal gridNorm = 0.0;
 
@@ -38,6 +40,7 @@ PetscErrorCode Process::run() const {
   PetscCall(Prepare(comm_).initialize(recipe, data));
   PetscCall(Metrics(comm_).compute(data, metricDiagnostics));
   PetscCall(BaseFlowDerivatives(comm_).compute(data, derivativeDiagnostics));
+  PetscCall(GlobalOperator(comm_).assemble(recipe, data, operatorDiagnostics));
 
   PetscCall(VecNorm(data.baseflow, NORM_2, &baseflowNorm));
   PetscCall(VecNorm(data.grid, NORM_2, &gridNorm));
@@ -98,7 +101,24 @@ PetscErrorCode Process::run() const {
                 derivative * flowComponentCount + 4)])));
   }
 
+  PetscCall(PetscPrintf(
+      comm_,
+      "  global matrices: %" PetscInt_FMT " x %" PetscInt_FMT
+      ", block size %" PetscInt_FMT "\n"
+      "  M_Gamma blocks used/allocated: %.0f / %.0f; ||M_Gamma||F: %.16g\n"
+      "  L blocks used/allocated: %.0f / %.0f; ||L||F: %.16g\n"
+      "  eigenvalue convention: (-L) q = lambda M_Gamma q, "
+      "lambda = -i omega\n",
+      operatorDiagnostics.rows, operatorDiagnostics.columns,
+      operatorDiagnostics.blockSize,
+      static_cast<double>(operatorDiagnostics.massUsedBlocks),
+      static_cast<double>(operatorDiagnostics.massAllocatedBlocks),
+      static_cast<double>(operatorDiagnostics.massFrobeniusNorm),
+      static_cast<double>(operatorDiagnostics.spatialUsedBlocks),
+      static_cast<double>(operatorDiagnostics.spatialAllocatedBlocks),
+      static_cast<double>(operatorDiagnostics.spatialFrobeniusNorm)));
+
   // Subsequent stages will be added here in order:
-  // transformed coefficients -> global matrices -> EPS solve -> output.
+  // boundary conditions -> EPS solve -> output.
   PetscFunctionReturn(PETSC_SUCCESS);
 }
