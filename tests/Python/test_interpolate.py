@@ -163,6 +163,8 @@ class PeriodicCasePreparationTests(unittest.TestCase):
             prepare_fdq_case(source, output, 4, 4, rules)
             with h5py.File(output, "r+") as handle:
                 self.assertEqual(int(handle.attrs["schema_version"]), 2)
+                self.assertEqual(handle.attrs["source_file"], "sample.h5")
+                self.assertEqual(int(handle.attrs["interpolation_version"]), 3)
                 self.assertEqual(handle["discretization/z"].attrs["topology"], "periodic")
                 self.assertEqual(
                     handle["discretization/z/stencil_offsets"].shape, (12, 5)

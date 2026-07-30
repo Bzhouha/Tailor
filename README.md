@@ -1,59 +1,156 @@
 # Tailor
 
-Tailor 是一个基于 complex PETSc/SLEPc 的时域 BiGlobal 稳定性求解器。当前入口将
-Python 数据预处理与 C++ PETSc 程序串联为一次完整运行：
+Tailor 是一个面向可压缩流动的并行 BiGlobal 线性稳定性求解器。项目使用 Python
+完成周期网格和 FD-q 数据准备，使用 C++、PETSc 与 SLEPc 装配并求解广义非厄米
+特征值问题。
 
-```text
-Tailor.py
-  -> 解析 case/config.yaml
-  -> 检查或生成 FD-q PETSc HDF5 缓存
-  -> 启动 C++ tailor 求解器
-```
-
-目前 C++ 阶段已经能够并行加载网格和基流、建立 DMDA，并读取 FD-q 两个方向的
-计算节点、stencil 索引以及零至二阶微分权重。加载阶段会校验 HDF5 schema、数组
-形状、索引范围和低阶多项式矩。随后程序计算一阶和二阶曲线坐标 metrics，以及
-基本流的 \(y,z,yy,zz,yz\) 导数。物理空间的
-\(\Gamma,A,B,C,D,V_{xx},V_{xy},V_{xz},V_{yy},V_{yz},V_{zz}\)
-节点系数也已按 `mod_cubes.f90` 实现，并可按需即时生成；全局矩阵组装和特征值
-求解将在后续阶段继续实现。
-
-流向采用 \(q(y,z)e^{i(\alpha x-\omega t)}\) 后，程序按节点生成
-\(K_0,K_y,K_z\)，再利用已有 metrics 变换为
-\(K_\xi,K_\eta,V_{\xi\xi},V_{\xi\eta},V_{\eta\eta}\)。最终空间算子约定为
+流向采用
 
 \[
-Lq=K_0q+K_\xi q_\xi+K_\eta q_\eta
--V_{\xi\xi}q_{\xi\xi}
--V_{\eta\eta}q_{\eta\eta}
--V_{\xi\eta}q_{\xi\eta}.
+\hat q(x,y,z,t)=q(y,z)e^{i(\alpha x-\omega t)}
 \]
 
-这些 \(5\times5\) 系数块不作为全网格数据保存；后续组装全局矩阵时在每个节点
-即时计算。
+并将问题写为
 
-## 环境与构建
+\[
+A_{\mathrm{bc}}q=\lambda B_{\mathrm{bc}}q,\qquad
+\lambda=-i\omega,\qquad A_{\mathrm{bc}}=-L_{\mathrm{bc}}.
+\]
 
-项目默认使用：
+因此 \(\operatorname{Re}(\lambda)>0\) 表示时间增长，求解后通过
+\(\omega=i\lambda\) 恢复复频率。
 
-- complex PETSc/SLEPc：`/Users/becrazy/Wro/petsc/arch-complex`
-- Python 环境：`/Users/becrazy/Wro/petsc-python`
-- HDF5、yaml-cpp、NumPy、SciPy、h5py、petsc4py 和 slepc4py
+## 功能
 
-在项目根目录构建 C++ 程序：
+- 有界壁法向 \(\xi\) 与周期展向 \(\eta\) 的 FD-q 离散；
+- 周期 quintic B-spline 网格及基本流插值；
+- PETSc HDF5 缓存校验、自动重建和原子替换；
+- 曲线坐标一、二阶 metrics；
+- 基本流 \(y,z,yy,zz,yz\) 导数；
+- 可压缩线性 Navier--Stokes 点系数和流向 Fourier 变换；
+- 基于 `MATBAIJ` 的分布式全局质量矩阵及空间矩阵；
+- 等温无滑移壁面和局部特征远场边界；
+- SLEPc Krylov--Schur、shift-and-invert 和稀疏 LU；
+- 自包含 HDF5 特征值、残差和特征模态输出。
+
+## 依赖
+
+### C++ 与并行数值库
+
+- CMake 3.24 或更高版本；
+- 支持 C++20 的编译器；
+- MPI；
+- complex-scalar PETSc；
+- 与 PETSc 兼容的 SLEPc 3.25 或更高版本；
+- PETSc 使用的 HDF5、BLAS 和 LAPACK；
+- yaml-cpp；
+- MUMPS，以及 MUMPS 所需的 ScaLAPACK、METIS/ParMETIS 等并行依赖。
+
+PETSc 必须使用复数标量构建，并建议在配置 PETSc 时直接启用 HDF5 和 MUMPS。
+一个典型配置形式如下，具体编译器和 MPI 选项应按计算平台调整：
 
 ```bash
+./configure \
+    --with-scalar-type=complex \
+    --download-hdf5 \
+    --download-mumps \
+    --download-scalapack \
+    --download-metis \
+    --download-parmetis \
+    --download-ptscotch
+make all
+make check
+```
+
+安装说明可参考
+[PETSc installation](https://petsc.org/release/install/) 和
+[SLEPc installation](https://slepc.upv.es/release/install/install.html)。
+
+### Python
+
+Tailor.py 需要 Python 3.10 或更高版本，以及：
+
+- NumPy；
+- SciPy；
+- h5py；
+- PyYAML；
+- petsc4py；
+- slepc4py。
+
+`petsc4py` 和 `slepc4py` 必须与 C++ 程序使用同一套 PETSc/SLEPc 和 MPI。对于已有
+PETSc/SLEPc 安装，可先设置标准环境变量，再安装 Python bindings：
+
+```bash
+export PETSC_DIR=/path/to/petsc
+export PETSC_ARCH=arch-complex
+export SLEPC_DIR=/path/to/slepc
+
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install numpy scipy h5py pyyaml petsc4py slepc4py
+```
+
+对于 prefix 安装，可省略 `PETSC_ARCH`。
+
+### 测试附加依赖
+
+完整 CTest 使用 `gfortran` 从参考 Fortran 公式生成固定测试数据。仅构建求解器时，
+可以使用 `-DBUILD_TESTING=OFF`，此时不需要 Fortran 编译器。
+
+## 构建
+
+先设置 PETSc 和 SLEPc 环境。CMake 会优先读取 `TAILOR_PETSC_PREFIX`，
+否则使用 `PETSC_DIR` 和可选的 `PETSC_ARCH`；SLEPc 类似地从
+`TAILOR_SLEPC_PREFIX` 或 `SLEPC_DIR` 查找。
+
+```bash
+export PETSC_DIR=/path/to/petsc
+export PETSC_ARCH=arch-complex
+export SLEPC_DIR=/path/to/slepc
+
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
-如安装位置不同，可在配置 CMake 时覆盖 `TAILOR_PETSC_PREFIX` 和
-`TAILOR_YAML_CPP_PREFIX`。CMake 会拒绝 real-scalar PETSc 或来自其他 MPI 安装的
-编译器，避免混合链接。
+非标准安装位置可以显式指定：
+
+```bash
+cmake -S . -B build \
+    -DTAILOR_PETSC_PREFIX=/path/to/petsc-prefix \
+    -DTAILOR_SLEPC_PREFIX=/path/to/slepc-prefix \
+    -DTAILOR_YAML_CPP_PREFIX=/path/to/yaml-cpp-prefix \
+    -DTAILOR_TEST_PYTHON=/path/to/python \
+    -DTAILOR_MPIEXEC=/path/to/mpiexec
+```
+
+CMake 会通过编译检查拒绝 real-scalar PETSc。
+
+## 目录
+
+```text
+Tailor/
+├── case/
+│   ├── config.yaml
+│   └── data/
+│       ├── sample.h5
+│       └── FD-q/fdq_sample_qy10_qz6.h5
+├── fdqNodes/                 # 可复用的一维 FD-q 规则缓存
+├── src/
+│   ├── CPlusPlus/            # PETSc/SLEPc 求解器
+│   └── Python/               # 插值、缓存和运行入口
+├── tests/
+├── CMakeLists.txt
+└── Tailor.py
+```
+
+仓库自带的 `case/` 是一个小型可运行示例。周期展向采用半开区间唯一节点，不保存
+重复末端点。
 
 ## Case 配置
 
-程序要求显式传入 YAML 配置文件。与 FD-q 预处理相关的基本字段为：
+`case/config.yaml` 包含输入、离散、物理参数、特征值搜索和输出设置。路径相对于
+配置文件所在目录解析：
 
 ```yaml
 CaseTitle: Sample
@@ -64,98 +161,103 @@ File: sample.h5
 Q-Value:
     y: 10
     z: 6
+
+Stability:
+    Alpha:
+        Real: 2.43
+        Imag: 0.0
+
+EigenSolver:
+    SearchCenterOmega:
+        Real: 0.0
+        Imag: 0.0
+    NumberOfEigenvalues: 8
+    Tolerance: 1.0e-10
+    MaximumIterations: 1000
+
+Output:
+    File: data/results/sample_eigenmodes.h5
 ```
 
-输入文件由 `Folder` 和 `File` 相对于配置文件所在目录解析。以上配置对应：
+输运模型固定为 Sutherland 定律，因此无需模型选择字段；仍需在 `Physics` 中提供
+Reynolds 数、Mach 数、Prandtl 数、比热比、参考温度、参考黏度和 Sutherland
+常数。
+
+## 运行
+
+官方入口始终先验证或自动更新 FD-q 缓存，再启动 C++ 程序。
+
+仅准备输入：
+
+```bash
+python Tailor.py -c case/config.yaml --prepare-only
+```
+
+开发机只装配矩阵和边界、不运行特征值求解：
+
+```bash
+python Tailor.py -c case/config.yaml -n 2 -- -tailor_assemble_only
+```
+
+在计算环境中求解局部谱：
+
+```bash
+python Tailor.py -c case/config.yaml -n 8 -- \
+    -st_pc_factor_mat_solver_type mumps
+```
+
+`--` 之后的参数会原样传递给 PETSc/SLEPc。可以用 `--solver`、
+`--mpiexec`、`TAILOR_EXECUTABLE` 和 `TAILOR_MPIEXEC` 覆盖自动发现结果。
+
+## 边界条件
+
+- 壁面：保留密度连续性方程，并施加 \(u'=v'=w'=T'=0\)；
+- 远场：沿曲线网格外法向执行局部线性特征分解，入射模设为零，出射模和近零模
+  保留投影后的完整方程；
+- 展向：周期 DMDA、周期 Ghost 和环绕 FD-q stencil。
+
+## 输出
+
+成功求解后，示例 case 写入：
 
 ```text
-输入：data/sample.h5
-输出：data/FD-q/fdq_sample_qy10_qz6.h5
+case/data/results/sample_eigenmodes.h5
 ```
 
-输运模型固定采用 Sutherland 定律，因此配置中不需要 `Physics.Transport.Model`；
-仍需提供 `ReferenceMu`、`ReferenceTemperature` 和 `SutherlandConstant`。
+输出目录会自动创建，文件通过临时文件验证后原子替换。HDF5 包含：
 
-## 完整运行
-
-先激活 Python 环境：
-
-```bash
-source /Users/becrazy/Wro/petsc-python/bin/activate
+```text
+/grid
+/baseflow
+/spectrum/lambda
+/spectrum/omega
+/spectrum/residual
+/modes/mode_000
+/modes/mode_001
+...
 ```
 
-串行运行：
+网格、基本流和模态使用 DMDA natural ordering：
 
-```bash
-python Tailor.py -c /Users/becrazy/Wro/cases/global/config.yaml
+```text
+ordering = k_j_dof
+mode dof = [rho, u, v, w, T]
 ```
-
-使用两个 MPI 进程运行：
-
-```bash
-python Tailor.py -c /Users/becrazy/Wro/cases/global/config.yaml -n 2
-```
-
-Python 主程序首先在独立子进程中检查或生成 FD-q 文件。缓存有效时直接复用，随后
-自动启动 C++ 求解器。任一阶段失败时，`Tailor.py` 会将非零返回码传回终端。
-
-## PETSc 参数
-
-在 `--` 后添加的参数会原样传递给 C++ PETSc/SLEPc 程序：
-
-```bash
-python Tailor.py -c /Users/becrazy/Wro/cases/global/config.yaml -n 2 -- \
-    -eps_nev 8 -eps_tol 1e-10
-```
-
-## 仅执行预处理
-
-只生成或验证 FD-q 缓存，不启动 C++：
-
-```bash
-python Tailor.py -c /Users/becrazy/Wro/cases/global/config.yaml --prepare-only
-```
-
-## 指定 C++ 与 MPI 程序
-
-默认依次在 `build/`、`cmake-build-debug/`、多配置构建目录及 `PATH` 中查找
-`tailor`。可以显式指定：
-
-```bash
-python Tailor.py -c config.yaml --solver /path/to/tailor
-```
-
-也可以设置环境变量 `TAILOR_EXECUTABLE`。
-
-当 `-n` 大于 1 时，默认使用 complex PETSc 安装内的 `mpiexec`，不会自动选择系统
-中的其他 MPI。需要覆盖时使用：
-
-```bash
-python Tailor.py -c config.yaml -n 2 --mpiexec /path/to/mpiexec
-```
-
-或设置环境变量 `TAILOR_MPIEXEC`。
 
 ## 测试
 
-运行 Python 测试：
+运行 Python 单元测试：
 
 ```bash
 python -m unittest discover -s tests/Python -v
 ```
 
-运行 CMake/CTest 测试（测试构建需要 `gfortran`，用于从规范 Fortran 公式生成
-LNS 系数黄金数据；测试运行本身不调用 Fortran）：
+运行 C++、MPI 和 Python/C++ 集成测试：
 
 ```bash
 ctest --test-dir build --output-on-failure
 ```
 
-## 辅助工具
-
-`tools/` 保存可复现的数据准备和 PETSc HDF5 读取验证程序，默认不参与构建。需要时：
-
-```bash
-cmake -S . -B build -DTAILOR_BUILD_TOOLS=ON
-cmake --build build -j
-```
+默认测试 case 是仓库内的 `case/config.yaml`。需要使用其他 case 或 Python
+解释器时，可在 CMake 配置阶段设置 `TAILOR_TEST_CONFIG` 和
+`TAILOR_TEST_PYTHON`。

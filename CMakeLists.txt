@@ -1,59 +1,108 @@
 cmake_minimum_required(VERSION 3.24)
 
-set(TAILOR_PETSC_PREFIX "/Users/becrazy/Wro/petsc/arch-complex" CACHE PATH
-    "Prefix of the complex PETSc/SLEPc installation used by Tailor")
-set(TAILOR_YAML_CPP_PREFIX "/opt/homebrew" CACHE PATH
-    "Prefix containing yaml-cpp-config.cmake")
+set(TAILOR_PETSC_PREFIX "" CACHE PATH
+    "Prefix of the complex PETSc installation used by Tailor")
+set(TAILOR_SLEPC_PREFIX "" CACHE PATH
+    "Optional prefix of the compatible SLEPc installation")
+set(TAILOR_YAML_CPP_PREFIX "" CACHE PATH
+    "Optional prefix containing yaml-cpp-config.cmake")
 set(TAILOR_TEST_CONFIG
-    "${CMAKE_CURRENT_LIST_DIR}/../cases/global/config.yaml" CACHE FILEPATH
+    "${CMAKE_CURRENT_LIST_DIR}/case/config.yaml" CACHE FILEPATH
     "Case configuration used by Tailor smoke tests")
-set(TAILOR_TEST_PYTHON
-    "${CMAKE_CURRENT_LIST_DIR}/../petsc-python/bin/python" CACHE FILEPATH
+set(TAILOR_TEST_PYTHON "" CACHE FILEPATH
     "Python interpreter containing h5py and PyYAML for Tailor integration tests")
-option(TAILOR_BUILD_TOOLS "Build input-data and FD-q verification tools" OFF)
+set(TAILOR_MPIEXEC "" CACHE FILEPATH
+    "MPI launcher used by Tailor's parallel tests")
 
-set(_tailor_mpicxx "${TAILOR_PETSC_PREFIX}/bin/mpicxx")
-if(NOT EXISTS "${_tailor_mpicxx}")
-    message(FATAL_ERROR "PETSc MPI C++ wrapper not found: ${_tailor_mpicxx}")
+if(NOT TAILOR_PETSC_PREFIX AND DEFINED ENV{TAILOR_PETSC_PREFIX})
+    set(TAILOR_PETSC_PREFIX "$ENV{TAILOR_PETSC_PREFIX}")
+endif()
+if(NOT TAILOR_PETSC_PREFIX AND DEFINED ENV{PETSC_DIR})
+    if(DEFINED ENV{PETSC_ARCH} AND NOT "$ENV{PETSC_ARCH}" STREQUAL "")
+        set(TAILOR_PETSC_PREFIX "$ENV{PETSC_DIR}/$ENV{PETSC_ARCH}")
+    else()
+        set(TAILOR_PETSC_PREFIX "$ENV{PETSC_DIR}")
+    endif()
+endif()
+if(NOT TAILOR_PETSC_PREFIX)
+    message(FATAL_ERROR
+        "Set PETSC_DIR (and PETSC_ARCH for an in-place build), export "
+        "TAILOR_PETSC_PREFIX, or pass -DTAILOR_PETSC_PREFIX=<prefix>.")
+endif()
+get_filename_component(TAILOR_PETSC_PREFIX
+    "${TAILOR_PETSC_PREFIX}" ABSOLUTE)
+set(TAILOR_PETSC_PREFIX "${TAILOR_PETSC_PREFIX}" CACHE PATH
+    "Prefix of the complex PETSc installation used by Tailor" FORCE)
+
+if(NOT TAILOR_SLEPC_PREFIX AND DEFINED ENV{TAILOR_SLEPC_PREFIX})
+    set(TAILOR_SLEPC_PREFIX "$ENV{TAILOR_SLEPC_PREFIX}")
+endif()
+if(NOT TAILOR_SLEPC_PREFIX AND DEFINED ENV{SLEPC_DIR})
+    if(DEFINED ENV{PETSC_ARCH}
+       AND EXISTS "$ENV{SLEPC_DIR}/$ENV{PETSC_ARCH}/lib/pkgconfig")
+        set(TAILOR_SLEPC_PREFIX "$ENV{SLEPC_DIR}/$ENV{PETSC_ARCH}")
+    else()
+        set(TAILOR_SLEPC_PREFIX "$ENV{SLEPC_DIR}")
+    endif()
+endif()
+if(NOT TAILOR_SLEPC_PREFIX)
+    set(TAILOR_SLEPC_PREFIX "${TAILOR_PETSC_PREFIX}")
+endif()
+get_filename_component(TAILOR_SLEPC_PREFIX
+    "${TAILOR_SLEPC_PREFIX}" ABSOLUTE)
+set(TAILOR_SLEPC_PREFIX "${TAILOR_SLEPC_PREFIX}" CACHE PATH
+    "Optional prefix of the compatible SLEPc installation" FORCE)
+
+find_program(_tailor_mpicxx NAMES mpicxx mpic++
+    HINTS "${TAILOR_PETSC_PREFIX}/bin")
+if(NOT _tailor_mpicxx)
+    message(FATAL_ERROR
+        "An MPI C++ compiler was not found. Add it to PATH or select it with "
+        "-DCMAKE_CXX_COMPILER=<mpicxx>.")
 endif()
 if(NOT DEFINED CMAKE_CXX_COMPILER)
     set(CMAKE_CXX_COMPILER "${_tailor_mpicxx}" CACHE FILEPATH
-        "C++ compiler from Tailor's PETSc arch")
+        "MPI C++ compiler used by Tailor")
 endif()
 
 project(Tailor VERSION 0.1.0 LANGUAGES CXX)
 
-if(NOT CMAKE_CXX_COMPILER STREQUAL "${_tailor_mpicxx}")
-    message(FATAL_ERROR
-        "Tailor must be configured with ${_tailor_mpicxx}; got ${CMAKE_CXX_COMPILER}. "
-        "Use a fresh build directory when changing PETSc arches.")
-endif()
-
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-list(PREPEND CMAKE_BUILD_RPATH "${TAILOR_PETSC_PREFIX}/lib")
+list(PREPEND CMAKE_BUILD_RPATH
+    "${TAILOR_PETSC_PREFIX}/lib"
+    "${TAILOR_SLEPC_PREFIX}/lib")
 
 set(_tailor_pkgconfig_path "${TAILOR_PETSC_PREFIX}/lib/pkgconfig")
+if(NOT TAILOR_SLEPC_PREFIX STREQUAL TAILOR_PETSC_PREFIX)
+    set(_tailor_pkgconfig_path
+        "${TAILOR_SLEPC_PREFIX}/lib/pkgconfig:${_tailor_pkgconfig_path}")
+endif()
 if(DEFINED ENV{PKG_CONFIG_PATH} AND NOT "$ENV{PKG_CONFIG_PATH}" STREQUAL "")
     set(ENV{PKG_CONFIG_PATH} "${_tailor_pkgconfig_path}:$ENV{PKG_CONFIG_PATH}")
 else()
     set(ENV{PKG_CONFIG_PATH} "${_tailor_pkgconfig_path}")
 endif()
-list(PREPEND CMAKE_PREFIX_PATH "${TAILOR_YAML_CPP_PREFIX}")
+if(TAILOR_YAML_CPP_PREFIX)
+    list(PREPEND CMAKE_PREFIX_PATH "${TAILOR_YAML_CPP_PREFIX}")
+endif()
 
 find_package(PkgConfig REQUIRED)
 find_package(yaml-cpp CONFIG REQUIRED)
 pkg_check_modules(SLEPC REQUIRED IMPORTED_TARGET "SLEPc>=3.25")
 find_library(TAILOR_PETSC_HDF5_LIBRARY
     NAMES hdf5.310 hdf5
-    PATHS "${TAILOR_PETSC_PREFIX}/lib"
-    NO_DEFAULT_PATH
+    HINTS "${TAILOR_PETSC_PREFIX}/lib"
     REQUIRED)
 
-if(NOT SLEPC_PREFIX STREQUAL TAILOR_PETSC_PREFIX)
-    message(FATAL_ERROR
-        "pkg-config selected SLEPc from ${SLEPC_PREFIX}, expected ${TAILOR_PETSC_PREFIX}")
+if(NOT TAILOR_MPIEXEC)
+    find_program(_tailor_mpiexec NAMES mpiexec mpirun
+        HINTS "${TAILOR_PETSC_PREFIX}/bin")
+    if(_tailor_mpiexec)
+        set(TAILOR_MPIEXEC "${_tailor_mpiexec}" CACHE FILEPATH
+            "MPI launcher used by Tailor's parallel tests" FORCE)
+    endif()
 endif()
 
 include(CheckCXXSourceCompiles)
@@ -90,8 +139,7 @@ add_library(tailor_core STATIC
     src/CPlusPlus/StreamwiseFourier.cpp
 )
 target_include_directories(tailor_core PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/CPlusPlus"
-    "${TAILOR_PETSC_PREFIX}/include")
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/CPlusPlus")
 target_link_libraries(tailor_core PUBLIC
     PkgConfig::SLEPC
     yaml-cpp::yaml-cpp
@@ -107,20 +155,38 @@ add_executable(tailor
 target_link_libraries(tailor PRIVATE tailor_core)
 tailor_enable_warnings(tailor)
 
-if(TAILOR_BUILD_TOOLS)
-    pkg_check_modules(HDF5 REQUIRED IMPORTED_TARGET "hdf5>=1.14")
-
-    add_executable(make_sample_h5 tools/make_sample_h5.cpp)
-    target_link_libraries(make_sample_h5 PRIVATE PkgConfig::HDF5)
-    tailor_enable_warnings(make_sample_h5)
-
-    add_executable(verify_fdq_load tools/verify_sample_load.cpp)
-    target_link_libraries(verify_fdq_load PRIVATE PkgConfig::SLEPC)
-    tailor_enable_warnings(verify_fdq_load)
-endif()
-
 include(CTest)
 if(BUILD_TESTING)
+    if(NOT TAILOR_MPIEXEC)
+        message(FATAL_ERROR
+            "An MPI launcher is required for tests. Add mpiexec to PATH or "
+            "pass -DTAILOR_MPIEXEC=<path>.")
+    endif()
+    if(NOT TAILOR_TEST_PYTHON)
+        set(Python3_FIND_VIRTUALENV FIRST)
+        find_package(Python3 COMPONENTS Interpreter QUIET)
+        if(Python3_Interpreter_FOUND)
+            set(TAILOR_TEST_PYTHON "${Python3_EXECUTABLE}" CACHE FILEPATH
+                "Python interpreter containing Tailor test dependencies" FORCE)
+        endif()
+    endif()
+    set(_tailor_python_tests_available FALSE)
+    if(EXISTS "${TAILOR_TEST_PYTHON}")
+        execute_process(
+            COMMAND "${TAILOR_TEST_PYTHON}" -c
+                    "import h5py, numpy, scipy, yaml"
+            RESULT_VARIABLE _tailor_python_import_status
+            OUTPUT_QUIET
+            ERROR_QUIET)
+        if(_tailor_python_import_status EQUAL 0)
+            set(_tailor_python_tests_available TRUE)
+        else()
+            message(STATUS
+                "TAILOR_TEST_PYTHON lacks h5py, NumPy, SciPy, or PyYAML; "
+                "skipping Python/C++ integration tests: "
+                "${TAILOR_TEST_PYTHON}")
+        endif()
+    endif()
     find_program(TAILOR_GFORTRAN NAMES gfortran REQUIRED)
     set(TAILOR_LNS_GOLD_GENERATOR
         "${CMAKE_CURRENT_BINARY_DIR}/generate_lns_coefficients_gold")
@@ -196,7 +262,7 @@ if(BUILD_TESTING)
             COMMAND tailor -c "${TAILOR_TEST_CONFIG}"
                     -tailor_assemble_only)
         add_test(NAME tailor_smoke_mpi_2
-            COMMAND "${TAILOR_PETSC_PREFIX}/bin/mpiexec" -n 2
+            COMMAND "${TAILOR_MPIEXEC}" -n 2
                     $<TARGET_FILE:tailor> -c "${TAILOR_TEST_CONFIG}"
                     -tailor_assemble_only)
         add_test(NAME tailor_lns_coefficients_serial
@@ -204,7 +270,7 @@ if(BUILD_TESTING)
                     -c "${TAILOR_TEST_CONFIG}"
                     -gold "${TAILOR_LNS_GOLD_FILE}")
         add_test(NAME tailor_lns_coefficients_mpi_2
-            COMMAND "${TAILOR_PETSC_PREFIX}/bin/mpiexec" -n 2
+            COMMAND "${TAILOR_MPIEXEC}" -n 2
                     $<TARGET_FILE:test_lns_coefficients>
                     -c "${TAILOR_TEST_CONFIG}"
                     -gold "${TAILOR_LNS_GOLD_FILE}")
@@ -213,7 +279,7 @@ if(BUILD_TESTING)
                     -c "${TAILOR_TEST_CONFIG}"
                     -gold "${TAILOR_LNS_TRANSFORM_GOLD_FILE}")
         add_test(NAME tailor_lns_transforms_mpi_2
-            COMMAND "${TAILOR_PETSC_PREFIX}/bin/mpiexec" -n 2
+            COMMAND "${TAILOR_MPIEXEC}" -n 2
                     $<TARGET_FILE:test_lns_transforms>
                     -c "${TAILOR_TEST_CONFIG}"
                     -gold "${TAILOR_LNS_TRANSFORM_GOLD_FILE}")
@@ -221,23 +287,23 @@ if(BUILD_TESTING)
             COMMAND test_global_operator
                     -c "${TAILOR_TEST_CONFIG}")
         add_test(NAME tailor_global_operator_mpi_2
-            COMMAND "${TAILOR_PETSC_PREFIX}/bin/mpiexec" -n 2
+            COMMAND "${TAILOR_MPIEXEC}" -n 2
                     $<TARGET_FILE:test_global_operator>
                     -c "${TAILOR_TEST_CONFIG}")
         add_test(NAME tailor_boundary_conditions_serial
             COMMAND test_boundary_conditions
                     -c "${TAILOR_TEST_CONFIG}")
         add_test(NAME tailor_boundary_conditions_mpi_2
-            COMMAND "${TAILOR_PETSC_PREFIX}/bin/mpiexec" -n 2
+            COMMAND "${TAILOR_MPIEXEC}" -n 2
                     $<TARGET_FILE:test_boundary_conditions>
                     -c "${TAILOR_TEST_CONFIG}")
-        if(EXISTS "${TAILOR_TEST_PYTHON}")
+        if(_tailor_python_tests_available)
             add_test(NAME tailor_fdq_invalid_inputs
                 COMMAND "${TAILOR_TEST_PYTHON}"
                         "${CMAKE_CURRENT_SOURCE_DIR}/tests/CPlusPlus/test_fdq_loader_failures.py"
                         --solver $<TARGET_FILE:tailor>
                         --config "${TAILOR_TEST_CONFIG}"
-                        --mpiexec "${TAILOR_PETSC_PREFIX}/bin/mpiexec")
+                        --mpiexec "${TAILOR_MPIEXEC}")
             set_tests_properties(tailor_fdq_invalid_inputs
                 PROPERTIES TIMEOUT 180)
             add_test(NAME tailor_metrics_regression
@@ -245,7 +311,7 @@ if(BUILD_TESTING)
                         "${CMAKE_CURRENT_SOURCE_DIR}/tests/CPlusPlus/test_metrics.py"
                         --solver $<TARGET_FILE:tailor>
                         --config "${TAILOR_TEST_CONFIG}"
-                        --mpiexec "${TAILOR_PETSC_PREFIX}/bin/mpiexec")
+                        --mpiexec "${TAILOR_MPIEXEC}")
             set_tests_properties(tailor_metrics_regression
                 PROPERTIES TIMEOUT 180)
             add_test(NAME tailor_baseflow_derivatives
@@ -253,7 +319,7 @@ if(BUILD_TESTING)
                         "${CMAKE_CURRENT_SOURCE_DIR}/tests/CPlusPlus/test_baseflow_derivatives.py"
                         --solver $<TARGET_FILE:tailor>
                         --config "${TAILOR_TEST_CONFIG}"
-                        --mpiexec "${TAILOR_PETSC_PREFIX}/bin/mpiexec")
+                        --mpiexec "${TAILOR_MPIEXEC}")
             set_tests_properties(tailor_baseflow_derivatives
                 PROPERTIES TIMEOUT 180)
             add_test(NAME tailor_physics_config
@@ -261,7 +327,7 @@ if(BUILD_TESTING)
                         "${CMAKE_CURRENT_SOURCE_DIR}/tests/CPlusPlus/test_physics_config.py"
                         --solver $<TARGET_FILE:tailor>
                         --config "${TAILOR_TEST_CONFIG}"
-                        --mpiexec "${TAILOR_PETSC_PREFIX}/bin/mpiexec")
+                        --mpiexec "${TAILOR_MPIEXEC}")
             set_tests_properties(tailor_physics_config
                 PROPERTIES TIMEOUT 180)
             add_test(NAME tailor_boundary_uniform
@@ -269,7 +335,7 @@ if(BUILD_TESTING)
                         "${CMAKE_CURRENT_SOURCE_DIR}/tests/CPlusPlus/test_boundary_uniform.py"
                         --test-binary $<TARGET_FILE:test_boundary_conditions>
                         --config "${TAILOR_TEST_CONFIG}"
-                        --mpiexec "${TAILOR_PETSC_PREFIX}/bin/mpiexec")
+                        --mpiexec "${TAILOR_MPIEXEC}")
             set_tests_properties(tailor_boundary_uniform
                 PROPERTIES TIMEOUT 180)
             add_test(NAME tailor_eigen_output
@@ -280,7 +346,8 @@ if(BUILD_TESTING)
                 PROPERTIES TIMEOUT 120)
         else()
             message(STATUS
-                "TAILOR_TEST_PYTHON does not exist; skipping malformed FD-q tests: "
+                "Python integration dependencies are unavailable; "
+                "skipping Python/C++ integration tests: "
                 "${TAILOR_TEST_PYTHON}")
         endif()
     else()

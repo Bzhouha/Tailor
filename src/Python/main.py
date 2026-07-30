@@ -14,7 +14,6 @@ from typing import Any, Sequence
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RULE_DIRECTORY = PROJECT_ROOT / "fdqNodes"
-DEFAULT_PETSC_PREFIX = PROJECT_ROOT.parent / "petsc" / "arch-complex"
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +156,23 @@ def _executable(path: Path | str, description: str) -> Path:
     return candidate
 
 
+def _petsc_prefix_from_environment() -> Path | None:
+    """Resolve a PETSc prefix from standard and Tailor environment variables."""
+
+    configured = os.environ.get("TAILOR_PETSC_PREFIX")
+    if configured:
+        return Path(configured).expanduser().resolve()
+
+    petsc_dir = os.environ.get("PETSC_DIR")
+    if not petsc_dir:
+        return None
+    prefix = Path(petsc_dir).expanduser()
+    petsc_arch = os.environ.get("PETSC_ARCH")
+    if petsc_arch:
+        prefix /= petsc_arch
+    return prefix.resolve()
+
+
 def find_solver(explicit: Path | str | None = None) -> Path:
     """Resolve the C++ executable without depending on the caller's cwd."""
 
@@ -187,7 +203,7 @@ def find_solver(explicit: Path | str | None = None) -> Path:
 
 
 def find_mpiexec(explicit: Path | str | None = None) -> Path:
-    """Resolve the MPI launcher from the same PETSc arch used by Tailor."""
+    """Resolve the MPI launcher from PETSc's environment or ``PATH``."""
 
     if explicit is not None:
         return _executable(explicit, "MPI launcher")
@@ -196,12 +212,20 @@ def find_mpiexec(explicit: Path | str | None = None) -> Path:
     if configured:
         return _executable(configured, "TAILOR_MPIEXEC")
 
-    bundled = DEFAULT_PETSC_PREFIX / "bin" / "mpiexec"
-    if bundled.is_file() and os.access(bundled, os.X_OK):
-        return bundled.resolve()
+    prefix = _petsc_prefix_from_environment()
+    if prefix is not None:
+        for name in ("mpiexec", "mpirun"):
+            bundled = prefix / "bin" / name
+            if bundled.is_file() and os.access(bundled, os.X_OK):
+                return bundled.resolve()
+
+    for name in ("mpiexec", "mpirun"):
+        installed = shutil.which(name)
+        if installed:
+            return Path(installed).resolve()
     raise FileNotFoundError(
-        "the complex PETSc mpiexec was not found. Pass --mpiexec PATH or "
-        "set TAILOR_MPIEXEC; a generic system MPI is not selected automatically."
+        "an MPI launcher was not found. Pass --mpiexec PATH, set "
+        "TAILOR_MPIEXEC, configure PETSC_DIR/PETSC_ARCH, or add mpiexec to PATH."
     )
 
 

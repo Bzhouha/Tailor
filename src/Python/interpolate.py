@@ -25,8 +25,7 @@ ComplexArray = NDArray[np.complex128]
 FloatArray = NDArray[np.float64]
 SCHEMA_VERSION = 2
 INTERPOLATION_METHOD = "bounded_y_periodic_z_quintic_bspline"
-INTERPOLATION_VERSION = 2
-DEFAULT_PETSC_PREFIX = Path("/Users/becrazy/Wro/petsc/arch-complex")
+INTERPOLATION_VERSION = 3
 
 
 def quintic_tensor_spline(
@@ -325,16 +324,32 @@ def _validate_interpolated_fields(
     return minimum_jacobian
 
 
+def _petsc_prefix_from_environment() -> Path | None:
+    """Resolve a PETSc prefix from standard and Tailor environment variables."""
+
+    configured = os.environ.get("TAILOR_PETSC_PREFIX")
+    if configured:
+        return Path(configured).expanduser().resolve()
+
+    petsc_dir = os.environ.get("PETSC_DIR")
+    if not petsc_dir:
+        return None
+    prefix = Path(petsc_dir).expanduser()
+    petsc_arch = os.environ.get("PETSC_ARCH")
+    if petsc_arch:
+        prefix /= petsc_arch
+    return prefix.resolve()
+
+
 def _configure_petsc_bindings(prefix: Path) -> None:
-    """Select the matching complex PETSc Python bindings."""
+    """Add an explicitly selected PETSc binding directory to ``sys.path``."""
 
     prefix = prefix.expanduser().resolve()
     bindings = prefix / "lib"
     if not bindings.is_dir():
         raise RuntimeError(f"PETSc Python bindings directory not found: {bindings}")
-    os.environ["PETSC_DIR"] = str(prefix.parent)
-    os.environ["PETSC_ARCH"] = prefix.name
-    sys.path.insert(0, str(bindings))
+    if str(bindings) not in sys.path:
+        sys.path.insert(0, str(bindings))
 
 
 def _write_petsc_vectors(
@@ -342,9 +357,15 @@ def _write_petsc_vectors(
 ) -> None:
     """Write grid and base flow using PETSc complex-Vec HDF5 layout."""
 
-    prefix = Path(os.environ.get("TAILOR_PETSC_PREFIX", str(DEFAULT_PETSC_PREFIX)))
-    _configure_petsc_bindings(prefix)
-    import petsc4py
+    prefix = _petsc_prefix_from_environment()
+    if prefix is not None:
+        _configure_petsc_bindings(prefix)
+    try:
+        import petsc4py
+    except ModuleNotFoundError as error:
+        raise RuntimeError(
+            "petsc4py is required and must match Tailor's complex PETSc build"
+        ) from error
 
     petsc4py.init([sys.argv[0]])
     from petsc4py import PETSc
@@ -512,7 +533,7 @@ def prepare_fdq_case(
         "schema_version": SCHEMA_VERSION,
         "interpolation_method": INTERPOLATION_METHOD,
         "interpolation_version": INTERPOLATION_VERSION,
-        "source_file": str(source),
+        "source_file": source.name,
         "source_sha256": source_sha256,
         "y_rule_sha256": y_rule_sha256,
         "z_rule_sha256": z_rule_sha256,

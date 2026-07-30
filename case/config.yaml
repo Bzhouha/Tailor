@@ -1,0 +1,36 @@
+CaseTitle: Sample
+
+Folder: data
+File: sample.h5
+Q-Value:
+    y: 10
+    z: 6
+
+Stability:
+    Alpha:
+        Real: 2.43
+        Imag: 0.0
+
+EigenSolver:
+    SearchCenterOmega:
+        Real: 0.0
+        Imag: 0.0
+    NumberOfEigenvalues: 8
+    Tolerance: 1.0e-10
+    MaximumIterations: 1000
+
+Output:
+    File: data/results/sample_eigenmodes.h5
+
+Physics:
+    Targets:
+        ReynoldsNumber: 32500
+        MachNumber: 6.0
+    Gas:
+        PrandtlNumber: 0.72
+        GasConstant: 287.05
+        RatioOfSpecificHeats: 1.4
+    Transport:
+        ReferenceMu: 1.716E-5       # Pa·s
+        ReferenceTemperature: 63.3340   # K
+        SutherlandConstant: 110.4   # K

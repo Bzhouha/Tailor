@@ -6,7 +6,7 @@ from pathlib import Path
 import unittest
 from unittest import mock
 
-from src.Python.main import CaseConfiguration, main, solver_command
+from src.Python.main import CaseConfiguration, find_mpiexec, main, solver_command
 
 
 class SolverCommandTests(unittest.TestCase):
@@ -59,6 +59,23 @@ class SolverCommandTests(unittest.TestCase):
             solver_command(
                 Path("/tmp/tailor"), Path("/tmp/config.yaml"), 0, None
             )
+
+    @mock.patch.dict("os.environ", {}, clear=True)
+    @mock.patch("src.Python.main._petsc_prefix_from_environment", return_value=None)
+    @mock.patch(
+        "src.Python.main.shutil.which",
+        side_effect=("/usr/bin/mpiexec", None),
+    )
+    def test_mpiexec_falls_back_to_path(
+        self,
+        which: mock.Mock,
+        petsc_prefix: mock.Mock,
+    ) -> None:
+        """Find a portable MPI launcher from PATH when PETSc has none."""
+
+        self.assertEqual(find_mpiexec(), Path("/usr/bin/mpiexec"))
+        which.assert_called_once_with("mpiexec")
+        petsc_prefix.assert_called_once_with()
 
 
 class DriverTests(unittest.TestCase):

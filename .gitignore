@@ -20,3 +20,6 @@ Testing/
 # Temporary files produced by atomic HDF5 writes
 *.tmp
 *.tmp-*.h5
+
+# Potentially large generated eigenvalue results
+case/data/results/
