@@ -16,11 +16,20 @@ constexpr PetscInt gridY = 1;
 constexpr PetscInt gridZ = 2;
 constexpr PetscInt firstMetricCount = 4;
 
+/** @brief Test whether an index belongs to a half-open local range. */
 bool inHalfOpenRange(PetscInt value, PetscInt first, PetscInt count) {
   return value >= first && value < first + count;
 }
 
+/** @brief Extract the real part of a validated PETSc scalar. */
 PetscReal realPart(PetscScalar value) { return PetscRealPart(value); }
+
+/** @brief Return the integer wrap count of a periodic global index. */
+PetscInt periodicWrap(PetscInt index, PetscInt nodeCount) {
+  if (index >= 0)
+    return index / nodeCount;
+  return -((-index + nodeCount - 1) / nodeCount);
+}
 
 } // namespace
 
@@ -88,7 +97,7 @@ Metrics::computeFirstOrder(ProblemData &data,
       bool stencilAvailable = true;
 
       for (PetscInt slot = 0; slot < data.xiRule.stencilSize(); ++slot) {
-        const PetscInt column = data.xiRule.stencilIndex(i, slot);
+        const PetscInt column = data.xiRule.localIndex(i, slot);
         if (!inHalfOpenRange(column, gxs, gxm)) {
           stencilAvailable = false;
           continue;
@@ -106,13 +115,16 @@ Metrics::computeFirstOrder(ProblemData &data,
       }
 
       for (PetscInt slot = 0; slot < data.etaRule.stencilSize(); ++slot) {
-        const PetscInt row = data.etaRule.stencilIndex(j, slot);
+        const PetscInt row = data.etaRule.localIndex(j, slot);
         if (!inHalfOpenRange(row, gys, gym)) {
           stencilAvailable = false;
           continue;
         }
         const PetscScalar y = gridArray[row][i][gridY];
-        const PetscScalar z = gridArray[row][i][gridZ];
+        const PetscScalar z =
+            gridArray[row][i][gridZ] +
+            static_cast<PetscReal>(periodicWrap(row, data.nz)) *
+                data.spanwisePeriod;
         if (PetscIsInfOrNanScalar(y) || PetscIsInfOrNanScalar(z))
           localFailures[1] = 1;
         localMaxImaginary =
@@ -247,7 +259,7 @@ PetscErrorCode Metrics::computeSecondOrder(ProblemData &data) const {
       bool stencilAvailable = true;
 
       for (PetscInt slot = 0; slot < data.xiRule.stencilSize(); ++slot) {
-        const PetscInt column = data.xiRule.stencilIndex(i, slot);
+        const PetscInt column = data.xiRule.localIndex(i, slot);
         if (!inHalfOpenRange(column, gxs, gxm)) {
           stencilAvailable = false;
           continue;
@@ -259,7 +271,7 @@ PetscErrorCode Metrics::computeSecondOrder(ProblemData &data) const {
       }
 
       for (PetscInt slot = 0; slot < data.etaRule.stencilSize(); ++slot) {
-        const PetscInt row = data.etaRule.stencilIndex(j, slot);
+        const PetscInt row = data.etaRule.localIndex(j, slot);
         if (!inHalfOpenRange(row, gys, gym)) {
           stencilAvailable = false;
           continue;

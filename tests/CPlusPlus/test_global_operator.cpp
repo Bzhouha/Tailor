@@ -1,3 +1,7 @@
+/**
+ * @file test_global_operator.cpp
+ * @brief Serial/MPI matrix-free regression tests for PETSc global operators.
+ */
 #include <slepcsys.h>
 
 #include <array>
@@ -17,6 +21,7 @@
 
 namespace {
 
+/** @brief Read one required string-valued PETSc option. */
 PetscErrorCode readOption(const char *name, std::string &value) {
   std::array<char, PETSC_MAX_PATH_LEN> buffer{};
   PetscBool found = PETSC_FALSE;
@@ -30,6 +35,7 @@ PetscErrorCode readOption(const char *name, std::string &value) {
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/** @brief Accumulate one dense 5-by-5 block action. */
 void applyBlock(const Block5 &block,
                 const std::array<PetscScalar, flowComponentCount> &input,
                 std::array<PetscScalar, flowComponentCount> &output,
@@ -42,6 +48,7 @@ void applyBlock(const Block5 &block,
   }
 }
 
+/** @brief Rebuild all pointwise transformed coefficients for a test node. */
 CoefficientStatus
 evaluateNode(const LNSCoefficients &physicalBuilder,
              const StreamwiseFourier &fourierTransform,
@@ -66,6 +73,7 @@ evaluateNode(const LNSCoefficients &physicalBuilder,
   return status;
 }
 
+/** @brief Fill a distributed state with reproducible complex values. */
 PetscErrorCode fillDeterministicVector(DM dm, Vec vector) {
   PetscScalar ***values = nullptr;
   PetscInt xs = 0;
@@ -93,6 +101,7 @@ PetscErrorCode fillDeterministicVector(DM dm, Vec vector) {
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/** @brief Compute independent matrix-free mass and spatial actions. */
 PetscErrorCode computeReferenceAction(const Recipe &recipe,
                                       const ProblemData &data, Vec input,
                                       Vec massResult, Vec spatialResult) {
@@ -157,7 +166,7 @@ PetscErrorCode computeReferenceAction(const Recipe &recipe,
             inputValues[j][i][component];
         for (PetscInt xiSlot = 0; xiSlot < data.xiRule.stencilSize();
              ++xiSlot) {
-          const PetscInt column = data.xiRule.stencilIndex(i, xiSlot);
+          const PetscInt column = data.xiRule.localIndex(i, xiSlot);
           const PetscScalar value = inputValues[j][column][component];
           dXi[static_cast<std::size_t>(component)] +=
               data.xiRule.weight(1, i, xiSlot) * value;
@@ -166,7 +175,7 @@ PetscErrorCode computeReferenceAction(const Recipe &recipe,
         }
         for (PetscInt etaSlot = 0; etaSlot < data.etaRule.stencilSize();
              ++etaSlot) {
-          const PetscInt row = data.etaRule.stencilIndex(j, etaSlot);
+          const PetscInt row = data.etaRule.localIndex(j, etaSlot);
           const PetscScalar value = inputValues[row][i][component];
           dEta[static_cast<std::size_t>(component)] +=
               data.etaRule.weight(1, j, etaSlot) * value;
@@ -174,7 +183,7 @@ PetscErrorCode computeReferenceAction(const Recipe &recipe,
               data.etaRule.weight(2, j, etaSlot) * value;
           for (PetscInt xiSlot = 0; xiSlot < data.xiRule.stencilSize();
                ++xiSlot) {
-            const PetscInt column = data.xiRule.stencilIndex(i, xiSlot);
+            const PetscInt column = data.xiRule.localIndex(i, xiSlot);
             dXiEta[static_cast<std::size_t>(component)] +=
                 data.etaRule.weight(1, j, etaSlot) *
                 data.xiRule.weight(1, i, xiSlot) *
@@ -212,6 +221,7 @@ PetscErrorCode computeReferenceAction(const Recipe &recipe,
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/** @brief Compare a PETSc MatMult result with an independent vector. */
 PetscErrorCode compareAction(Mat matrix, Vec input, Vec expected,
                              const char *name, PetscReal tolerance) {
   Vec actual = nullptr;
@@ -232,6 +242,7 @@ PetscErrorCode compareAction(Mat matrix, Vec input, Vec expected,
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/** @brief Validate matrix type, block layout, dimensions, and preallocation. */
 PetscErrorCode validateStructure(const ProblemData &data,
                                  const GlobalOperatorDiagnostics &diagnostics) {
   PetscInt massBlockSize = 0;
@@ -284,6 +295,7 @@ PetscErrorCode validateStructure(const ProblemData &data,
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/** @brief Prepare a real case and run all global-operator checks. */
 PetscErrorCode runTests() {
   std::string configPath;
   Recipe recipe;
@@ -327,6 +339,7 @@ PetscErrorCode runTests() {
 
 } // namespace
 
+/** @brief Initialize SLEPc, run the regression, and finalize collectively. */
 int main(int argc, char **argv) {
   PetscErrorCode error = SlepcInitialize(&argc, &argv, nullptr, nullptr);
   if (error != PETSC_SUCCESS)

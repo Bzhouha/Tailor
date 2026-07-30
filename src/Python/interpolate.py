@@ -12,16 +12,20 @@ from typing import Sequence
 import h5py
 import numpy as np
 from numpy.typing import NDArray
-from scipy.interpolate import RectBivariateSpline
+from scipy.interpolate import RectBivariateSpline, make_interp_spline
 
-from .fdq_nodes import FDQRule, load_or_create_fdq_rule
+from .fdq_nodes import (
+    FDQRule,
+    load_or_create_fdq_rule,
+    load_or_create_periodic_fdq_rule,
+)
 
 
 ComplexArray = NDArray[np.complex128]
 FloatArray = NDArray[np.float64]
-SCHEMA_VERSION = 1
-INTERPOLATION_METHOD = "tensor_product_quintic_bspline"
-INTERPOLATION_VERSION = 1
+SCHEMA_VERSION = 2
+INTERPOLATION_METHOD = "bounded_y_periodic_z_quintic_bspline"
+INTERPOLATION_VERSION = 2
 DEFAULT_PETSC_PREFIX = Path("/Users/becrazy/Wro/petsc/arch-complex")
 
 
@@ -59,6 +63,8 @@ def quintic_tensor_spline(
         raise ValueError("source logical coordinates must be strictly increasing")
 
     def interpolate_real(real_values: NDArray[np.generic]) -> FloatArray:
+        """Evaluate one real tensor-product quintic spline."""
+
         spline = RectBivariateSpline(
             z_old,
             y_old,
@@ -74,7 +80,87 @@ def quintic_tensor_spline(
     return interpolate_real(field)
 
 
+def periodic_quintic_tensor_spline(
+    z_old: FloatArray,
+    y_old: FloatArray,
+    values: NDArray[np.generic],
+    z_new: FloatArray,
+    y_new: FloatArray,
+    *,
+    z_period: float = 2.0,
+    value_translation: complex | float = 0.0,
+) -> NDArray[np.generic]:
+    """Interpolate a field that is periodic up to a constant spanwise shift."""
+
+    z_old = np.asarray(z_old, dtype=np.float64)
+    y_old = np.asarray(y_old, dtype=np.float64)
+    z_new = np.asarray(z_new, dtype=np.float64)
+    y_new = np.asarray(y_new, dtype=np.float64)
+    field = np.asarray(values)
+    if z_old.ndim != 1 or y_old.ndim != 1:
+        raise ValueError("source logical coordinates must be one-dimensional")
+    if z_new.ndim != 1 or y_new.ndim != 1:
+        raise ValueError("target logical coordinates must be one-dimensional")
+    if z_old.size < 6 or y_old.size < 6:
+        raise ValueError("periodic quintic interpolation requires at least 6 nodes per axis")
+    if field.shape != (z_old.size, y_old.size):
+        raise ValueError(
+            f"values must have shape {(z_old.size, y_old.size)}; got {field.shape}"
+        )
+    if not np.isfinite(z_period) or z_period <= 0.0:
+        raise ValueError("z_period must be finite and positive")
+    if not all(
+        np.all(np.isfinite(array))
+        for array in (z_old, y_old, z_new, y_new, field)
+    ):
+        raise ValueError("periodic spline coordinates and values must be finite")
+    if np.any(np.diff(z_old) <= 0.0) or np.any(np.diff(y_old) <= 0.0):
+        raise ValueError("source logical coordinates must be strictly increasing")
+    expected_spacing = z_period / z_old.size
+    if float(np.max(np.abs(np.diff(z_old) - expected_spacing))) > (
+        5.0e-13 * max(1.0, abs(expected_spacing))
+    ):
+        raise ValueError("periodic source logical nodes must be uniformly spaced")
+    if z_old[-1] >= z_old[0] + z_period:
+        raise ValueError("periodic source nodes must not include the repeated endpoint")
+
+    source_phase = (z_old - z_old[0]) / z_period
+    target_phase = (z_new - z_old[0]) / z_period
+    periodic_part = field - source_phase[:, None] * value_translation
+
+    def interpolate_scalar(scalar_values: NDArray[np.generic]) -> FloatArray:
+        """Interpolate one real component with periodic eta closure."""
+
+        bounded_spline = make_interp_spline(
+            y_old,
+            np.asarray(scalar_values, dtype=np.float64),
+            k=5,
+            axis=1,
+        )
+        along_y = np.asarray(bounded_spline(y_new), dtype=np.float64)
+        extended_z = np.concatenate((z_old, [z_old[0] + z_period]))
+        extended_values = np.concatenate((along_y, along_y[:1]), axis=0)
+        periodic_spline = make_interp_spline(
+            extended_z,
+            extended_values,
+            k=5,
+            bc_type="periodic",
+            axis=0,
+        )
+        return np.asarray(periodic_spline(z_new), dtype=np.float64)
+
+    if np.iscomplexobj(periodic_part):
+        interpolated = interpolate_scalar(periodic_part.real) + 1j * interpolate_scalar(
+            periodic_part.imag
+        )
+    else:
+        interpolated = interpolate_scalar(periodic_part)
+    return interpolated + target_phase[:, None] * value_translation
+
+
 def _sha256(path: Path) -> str:
+    """Return the SHA-256 digest of a cache dependency."""
+
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
@@ -82,7 +168,11 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _read_structured_sample(path: Path) -> tuple[ComplexArray, ComplexArray, int, int]:
+def _read_structured_sample(
+    path: Path,
+) -> tuple[ComplexArray, ComplexArray, int, int, float]:
+    """Load and validate a half-open periodic structured source case."""
+
     with h5py.File(path, "r") as handle:
         if "grid" not in handle or "baseflow" not in handle:
             raise ValueError("sample HDF5 must contain /grid and /baseflow")
@@ -91,11 +181,19 @@ def _read_structured_sample(path: Path) -> tuple[ComplexArray, ComplexArray, int
             nz = int(handle.attrs["Nz"])
         except KeyError as error:
             raise ValueError("sample HDF5 must define root attributes Ny and Nz") from error
+        if int(handle.attrs.get("spanwise_periodic", 0)) != 1:
+            raise ValueError("sample HDF5 must declare spanwise_periodic=1")
+        try:
+            spanwise_period = float(handle.attrs["spanwise_period"])
+        except KeyError as error:
+            raise ValueError("sample HDF5 must define spanwise_period") from error
         grid_parts = np.asarray(handle["grid"], dtype=np.float64)
         baseflow_parts = np.asarray(handle["baseflow"], dtype=np.float64)
 
     if ny < 6 or nz < 6:
         raise ValueError("sample Ny and Nz must both be at least 6")
+    if not np.isfinite(spanwise_period) or spanwise_period <= 0.0:
+        raise ValueError("sample spanwise_period must be finite and positive")
     if grid_parts.shape != (nz, ny, 3, 2):
         raise ValueError(
             f"/grid must have shape {(nz, ny, 3, 2)}; got {grid_parts.shape}"
@@ -117,7 +215,7 @@ def _read_structured_sample(path: Path) -> tuple[ComplexArray, ComplexArray, int
         raise ValueError("sample density must be strictly positive")
     if np.any(baseflow[..., 4].real <= 0.0):
         raise ValueError("sample temperature must be strictly positive")
-    return grid, baseflow, ny, nz
+    return grid, baseflow, ny, nz, spanwise_period
 
 
 def _interpolate_components(
@@ -126,22 +224,50 @@ def _interpolate_components(
     y_old: FloatArray,
     z_new: FloatArray,
     y_new: FloatArray,
+    translations: NDArray[np.generic] | None = None,
 ) -> ComplexArray:
+    """Interpolate every component, optionally with affine translations."""
+
     result = np.empty((z_new.size, y_new.size, values.shape[2]), dtype=np.complex128)
+    component_translations = (
+        np.zeros(values.shape[2], dtype=np.complex128)
+        if translations is None
+        else np.asarray(translations, dtype=np.complex128)
+    )
+    if component_translations.shape != (values.shape[2],):
+        raise ValueError("translations must contain one value per field component")
     for component in range(values.shape[2]):
-        result[..., component] = quintic_tensor_spline(
-            z_old, y_old, values[..., component], z_new, y_new
+        result[..., component] = periodic_quintic_tensor_spline(
+            z_old,
+            y_old,
+            values[..., component],
+            z_new,
+            y_new,
+            z_period=2.0,
+            value_translation=component_translations[component],
         )
     return result
 
 
-def _differentiate(values: FloatArray, rule: FDQRule, axis: int) -> FloatArray:
+def _differentiate(
+    values: FloatArray,
+    rule: FDQRule,
+    axis: int,
+    periodic_translation: float = 0.0,
+) -> FloatArray:
+    """Apply one FD-q first-derivative rule along a tensor-product axis."""
+
     weights = rule.weights[1]
     if axis == 1:
         sampled = values[:, rule.stencil_indices]
         return np.einsum("zij,ij->zi", sampled, weights)
     if axis == 0:
         sampled = values[rule.stencil_indices, :]
+        if rule.topology == "periodic" and periodic_translation != 0.0:
+            rows = np.arange(rule.node_count, dtype=np.int64)[:, None]
+            unwrapped = rows + rule.stencil_offsets
+            wraps = (unwrapped - rule.stencil_indices) // rule.node_count
+            sampled = sampled + wraps[:, :, None] * periodic_translation
         return np.einsum("izj,iz->ij", sampled, weights)
     raise ValueError("axis must be 0 or 1")
 
@@ -153,7 +279,10 @@ def _validate_interpolated_fields(
     baseflow: ComplexArray,
     y_rule: FDQRule,
     z_rule: FDQRule,
+    spanwise_period: float,
 ) -> float:
+    """Validate physical fields and return the minimum grid Jacobian."""
+
     if not np.all(np.isfinite(grid)) or not np.all(np.isfinite(baseflow)):
         raise ValueError("interpolated grid and baseflow must be finite")
     if np.any(baseflow[..., 0].real <= 0.0):
@@ -181,7 +310,9 @@ def _validate_interpolated_fields(
     y_y = _differentiate(physical_y, y_rule, axis=1)
     y_z = _differentiate(physical_y, z_rule, axis=0)
     z_y = _differentiate(physical_z, y_rule, axis=1)
-    z_z = _differentiate(physical_z, z_rule, axis=0)
+    z_z = _differentiate(
+        physical_z, z_rule, axis=0, periodic_translation=spanwise_period
+    )
     jacobian = y_y * z_z - y_z * z_y
     if not np.all(np.isfinite(jacobian)):
         raise ValueError("interpolated grid Jacobian contains non-finite values")
@@ -195,6 +326,8 @@ def _validate_interpolated_fields(
 
 
 def _configure_petsc_bindings(prefix: Path) -> None:
+    """Select the matching complex PETSc Python bindings."""
+
     prefix = prefix.expanduser().resolve()
     bindings = prefix / "lib"
     if not bindings.is_dir():
@@ -207,6 +340,8 @@ def _configure_petsc_bindings(prefix: Path) -> None:
 def _write_petsc_vectors(
     path: Path, grid: ComplexArray, baseflow: ComplexArray
 ) -> None:
+    """Write grid and base flow using PETSc complex-Vec HDF5 layout."""
+
     prefix = Path(os.environ.get("TAILOR_PETSC_PREFIX", str(DEFAULT_PETSC_PREFIX)))
     _configure_petsc_bindings(prefix)
     import petsc4py
@@ -241,11 +376,19 @@ def _write_petsc_vectors(
 
 
 def _write_rule(group: h5py.Group, rule: FDQRule) -> None:
+    """Serialize one validated FD-q rule into an HDF5 group."""
+
     group.attrs["N"] = rule.N
     group.attrs["q"] = rule.q
+    group.attrs["node_count"] = rule.node_count
+    group.attrs["topology"] = rule.topology
+    group.attrs["period"] = rule.period
     group.create_dataset("nodes", data=rule.nodes, dtype=np.float64)
     group.create_dataset(
         "stencil_indices", data=rule.stencil_indices, dtype=np.int64
+    )
+    group.create_dataset(
+        "stencil_offsets", data=rule.stencil_offsets, dtype=np.int64
     )
     weights = group.create_group("weights")
     for derivative in range(3):
@@ -258,10 +401,12 @@ def _write_rule(group: h5py.Group, rule: FDQRule) -> None:
 
 def _append_metadata(
     path: Path,
-    expected: dict[str, int | str],
+    expected: dict[str, int | float | str],
     y_rule: FDQRule,
     z_rule: FDQRule,
 ) -> None:
+    """Append schema metadata and both rules to a PETSc-created file."""
+
     with h5py.File(path, "r+") as handle:
         for name, value in expected.items():
             handle.attrs[name] = value
@@ -271,6 +416,8 @@ def _append_metadata(
 
 
 def _normalize_attribute(value: object) -> object:
+    """Convert HDF5 scalar and byte attributes to Python values."""
+
     if isinstance(value, bytes):
         return value.decode("utf-8")
     if isinstance(value, np.generic):
@@ -280,12 +427,14 @@ def _normalize_attribute(value: object) -> object:
 
 def _validate_output(
     path: Path,
-    expected: dict[str, int | str],
+    expected: dict[str, int | float | str],
     y_rule: FDQRule,
     z_rule: FDQRule,
 ) -> None:
-    ny = y_rule.N + 1
-    nz = z_rule.N + 1
+    """Validate a prepared schema-v2 case cache before reuse."""
+
+    ny = y_rule.node_count
+    nz = z_rule.node_count
     with h5py.File(path, "r") as handle:
         for name, value in expected.items():
             actual = _normalize_attribute(handle.attrs.get(name))
@@ -307,11 +456,19 @@ def _validate_output(
             group = handle[f"discretization/{direction}"]
             if int(group.attrs["N"]) != rule.N or int(group.attrs["q"]) != rule.q:
                 raise ValueError(f"cached {direction} FD-q metadata is inconsistent")
+            if int(group.attrs["node_count"]) != rule.node_count:
+                raise ValueError(f"cached {direction} node count is inconsistent")
+            if _normalize_attribute(group.attrs["topology"]) != rule.topology:
+                raise ValueError(f"cached {direction} topology is inconsistent")
             if group["nodes"].shape != rule.nodes.shape:
                 raise ValueError(f"cached {direction} FD-q nodes have the wrong shape")
             if group["stencil_indices"].shape != rule.stencil_indices.shape:
                 raise ValueError(
                     f"cached {direction} FD-q stencil indices have the wrong shape"
+                )
+            if group["stencil_offsets"].shape != rule.stencil_offsets.shape:
+                raise ValueError(
+                    f"cached {direction} stencil offsets have the wrong shape"
                 )
             for derivative in range(3):
                 if group[f"weights/d{derivative}"].shape != rule.weights[derivative].shape:
@@ -334,7 +491,7 @@ def prepare_fdq_case(
     rules = Path(rule_directory).expanduser().resolve()
     if not source.is_file():
         raise FileNotFoundError(f"structured sample file does not exist: {source}")
-    grid, baseflow, ny, nz = _read_structured_sample(source)
+    grid, baseflow, ny, nz, spanwise_period = _read_structured_sample(source)
     if isinstance(q_y, bool) or not isinstance(q_y, int):
         raise TypeError("q_y must be an integer polynomial degree")
     if isinstance(q_z, bool) or not isinstance(q_z, int):
@@ -343,13 +500,15 @@ def prepare_fdq_case(
         raise ValueError(f"q_y must satisfy 2 <= q_y <= {ny - 1}")
     if not 2 <= q_z <= nz - 1:
         raise ValueError(f"q_z must satisfy 2 <= q_z <= {nz - 1}")
+    if q_z % 2 != 0:
+        raise ValueError("periodic q_z must be even")
 
     y_rule = load_or_create_fdq_rule(ny - 1, q_y, rules)
-    z_rule = load_or_create_fdq_rule(nz - 1, q_z, rules)
+    z_rule = load_or_create_periodic_fdq_rule(nz, q_z, rules)
     source_sha256 = _sha256(source)
     y_rule_sha256 = _sha256(rules / f"N{ny - 1}_q{q_y}.h5")
-    z_rule_sha256 = _sha256(rules / f"N{nz - 1}_q{q_z}.h5")
-    expected: dict[str, int | str] = {
+    z_rule_sha256 = _sha256(rules / f"N{nz}_q{q_z}p.h5")
+    expected: dict[str, int | float | str] = {
         "schema_version": SCHEMA_VERSION,
         "interpolation_method": INTERPOLATION_METHOD,
         "interpolation_version": INTERPOLATION_VERSION,
@@ -360,10 +519,10 @@ def prepare_fdq_case(
         "ordering": "k_j_dof",
         "Ny": ny,
         "Nz": nz,
-        "N_y": ny - 1,
         "q_y": q_y,
-        "N_z": nz - 1,
         "q_z": q_z,
+        "spanwise_periodic": 1,
+        "spanwise_period": spanwise_period,
     }
 
     if destination.is_file():
@@ -376,9 +535,17 @@ def prepare_fdq_case(
             return destination
 
     y_old = np.linspace(-1.0, 1.0, ny, dtype=np.float64)
-    z_old = np.linspace(-1.0, 1.0, nz, dtype=np.float64)
+    z_old = -1.0 + 2.0 * np.arange(nz, dtype=np.float64) / nz
+    grid_translation = np.asarray(
+        [0.0, 0.0, spanwise_period], dtype=np.complex128
+    )
     interpolated_grid = _interpolate_components(
-        grid, z_old, y_old, z_rule.nodes, y_rule.nodes
+        grid,
+        z_old,
+        y_old,
+        z_rule.nodes,
+        y_rule.nodes,
+        grid_translation,
     )
     interpolated_baseflow = _interpolate_components(
         baseflow, z_old, y_old, z_rule.nodes, y_rule.nodes
@@ -390,6 +557,7 @@ def prepare_fdq_case(
         interpolated_baseflow,
         y_rule,
         z_rule,
+        spanwise_period,
     )
 
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -417,6 +585,8 @@ def prepare_fdq_case(
 
 
 def _parser() -> argparse.ArgumentParser:
+    """Construct the standalone preprocessing command-line parser."""
+
     parser = argparse.ArgumentParser(
         prog="python -m src.Python.interpolate",
         description="Generate or validate a PETSc-compatible FD-q case cache.",
@@ -430,6 +600,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run standalone FD-q case preparation and report failures."""
+
     arguments = _parser().parse_args(argv)
     try:
         prepare_fdq_case(

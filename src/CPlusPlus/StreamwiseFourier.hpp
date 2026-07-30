@@ -13,12 +13,19 @@
 
 /** @brief Physical y/z coefficient blocks after substituting d/dx = i alpha. */
 struct FourierLNSCoefficients {
+  /** Generalized time/mass block. */
   Block5 Gamma;
+  /** Zeroth-order Fourier-space block. */
   Block5 K0;
+  /** Physical-y first-derivative block. */
   Block5 Ky;
+  /** Physical-z first-derivative block. */
   Block5 Kz;
+  /** Physical-y second-derivative viscous block. */
   Block5 Vyy;
+  /** Physical mixed-derivative viscous block. */
   Block5 Vyz;
+  /** Physical-z second-derivative viscous block. */
   Block5 Vzz;
 
   /** @brief Test that all seven transformed blocks are finite. */
@@ -53,5 +60,6 @@ public:
         FourierLNSCoefficients &fourier) const noexcept;
 
 private:
+  /** Complex streamwise Fourier wavenumber. */
   PetscScalar alpha_;
 };

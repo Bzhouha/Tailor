@@ -11,14 +11,23 @@
 
 /** @brief Structural and norm diagnostics for the assembled matrices. */
 struct GlobalOperatorDiagnostics {
+  /** Global scalar row count. */
   PetscInt rows = 0;
+  /** Global scalar column count. */
   PetscInt columns = 0;
+  /** PETSc matrix block size. */
   PetscInt blockSize = 0;
+  /** Number of mass-matrix blocks containing stored entries. */
   PetscLogDouble massUsedBlocks = 0.0;
+  /** Number of preallocated mass-matrix blocks. */
   PetscLogDouble massAllocatedBlocks = 0.0;
+  /** Number of spatial-matrix blocks containing stored entries. */
   PetscLogDouble spatialUsedBlocks = 0.0;
+  /** Number of preallocated spatial-matrix blocks. */
   PetscLogDouble spatialAllocatedBlocks = 0.0;
+  /** Frobenius norm of \f$M_\Gamma\f$. */
   PetscReal massFrobeniusNorm = 0.0;
+  /** Frobenius norm of \f$L\f$. */
   PetscReal spatialFrobeniusNorm = 0.0;
 };
 
@@ -45,13 +54,18 @@ public:
                           GlobalOperatorDiagnostics &diagnostics) const;
 
 private:
+  /** @brief Validate pointwise coefficients before matrix creation. */
   PetscErrorCode validateCoefficients(const Recipe &recipe,
                                       const ProblemData &data) const;
+  /** @brief Preallocate compatible MPIBAIJ matrices exactly. */
   PetscErrorCode createMatrices(ProblemData &data) const;
+  /** @brief Insert all tensor-product stencil block contributions. */
   PetscErrorCode insertValues(const Recipe &recipe, ProblemData &data) const;
+  /** @brief Collect global sparsity and norm diagnostics. */
   PetscErrorCode
   computeDiagnostics(const ProblemData &data,
                      GlobalOperatorDiagnostics &diagnostics) const;
 
+  /** Communicator shared by all matrix assembly operations. */
   MPI_Comm comm_;
 };

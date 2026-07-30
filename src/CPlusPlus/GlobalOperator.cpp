@@ -20,6 +20,7 @@ namespace {
 
 constexpr PetscInt blockSize = flowComponentCount;
 
+/** @brief Owned/ghost DMDA geometry and block-index mapping view. */
 struct GridOwnership {
   PetscInt xs = 0;
   PetscInt ys = 0;
@@ -34,20 +35,24 @@ struct GridOwnership {
   const PetscInt *localToGlobalBlocks = nullptr;
 };
 
+/** @brief Convert one ghosted grid coordinate to a local mapping slot. */
 PetscInt ghostSlot(const GridOwnership &ownership, PetscInt i, PetscInt j) {
   return (j - ownership.gys) * ownership.gxm + (i - ownership.gxs);
 }
 
+/** @brief Map one ghosted grid coordinate to a PETSc global block. */
 PetscInt globalBlock(const GridOwnership &ownership, PetscInt i, PetscInt j) {
   return ownership.localToGlobalBlocks[ghostSlot(ownership, i, j)];
 }
 
+/** @brief Accumulate a scaled dense block. */
 void addScaled(Block5 &destination, const Block5 &source, PetscScalar scale) {
   for (PetscInt row = 0; row < blockSize; ++row)
     for (PetscInt column = 0; column < blockSize; ++column)
       destination(row, column) += scale * source(row, column);
 }
 
+/** @brief Form a two-term dense block linear combination. */
 Block5 linearCombination(const Block5 &first, PetscScalar firstScale,
                          const Block5 &second, PetscScalar secondScale) {
   Block5 result;
@@ -56,6 +61,7 @@ Block5 linearCombination(const Block5 &first, PetscScalar firstScale,
   return result;
 }
 
+/** @brief Borrow field ownership and the local-to-global block map. */
 PetscErrorCode getOwnership(const ProblemData &data,
                             ISLocalToGlobalMapping mapping,
                             GridOwnership &ownership) {
@@ -81,6 +87,7 @@ PetscErrorCode getOwnership(const ProblemData &data,
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/** @brief Restore the borrowed local-to-global block map. */
 PetscErrorCode restoreOwnership(ISLocalToGlobalMapping mapping,
                                 GridOwnership &ownership) {
   PetscFunctionBeginUser;
@@ -89,6 +96,7 @@ PetscErrorCode restoreOwnership(ISLocalToGlobalMapping mapping,
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/** @brief Attach DMDA stencil metadata and strict insertion options. */
 PetscErrorCode configureStencilMatrix(DM dm, Mat matrix, const char *name) {
   ISLocalToGlobalMapping mapping = nullptr;
   PetscInt gxs = 0;
@@ -111,6 +119,7 @@ PetscErrorCode configureStencilMatrix(DM dm, Mat matrix, const char *name) {
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/** @brief Evaluate the complete node coefficient transformation pipeline. */
 CoefficientStatus
 evaluateNode(const LNSCoefficients &physicalBuilder,
              const StreamwiseFourier &fourierTransform,
@@ -135,6 +144,7 @@ evaluateNode(const LNSCoefficients &physicalBuilder,
   return status;
 }
 
+/** @brief Insert one row-major block by DMDA stencil coordinates. */
 PetscErrorCode insertBlock(Mat matrix, const MatStencil &row,
                            const MatStencil &column, const Block5 &block,
                            InsertMode mode) {
@@ -233,10 +243,10 @@ PetscErrorCode GlobalOperator::createMatrices(ProblemData &data) const {
                                                data.etaRule.stencilSize()));
       for (PetscInt etaSlot = 0; etaSlot < data.etaRule.stencilSize();
            ++etaSlot) {
-        const PetscInt columnJ = data.etaRule.stencilIndex(j, etaSlot);
+        const PetscInt columnJ = data.etaRule.localIndex(j, etaSlot);
         for (PetscInt xiSlot = 0; xiSlot < data.xiRule.stencilSize();
              ++xiSlot) {
-          const PetscInt columnI = data.xiRule.stencilIndex(i, xiSlot);
+          const PetscInt columnI = data.xiRule.localIndex(i, xiSlot);
           PetscCheck(
               columnI >= ownership.gxs &&
                   columnI < ownership.gxs + ownership.gxm &&
@@ -317,7 +327,7 @@ PetscErrorCode GlobalOperator::insertValues(const Recipe &recipe,
 
       for (PetscInt xiSlot = 0; xiSlot < data.xiRule.stencilSize(); ++xiSlot) {
         MatStencil column{};
-        column.i = data.xiRule.stencilIndex(i, xiSlot);
+        column.i = data.xiRule.localIndex(i, xiSlot);
         column.j = j;
         const Block5 block = linearCombination(
             coefficients.Kxi, data.xiRule.weight(1, i, xiSlot),
@@ -330,7 +340,7 @@ PetscErrorCode GlobalOperator::insertValues(const Recipe &recipe,
            ++etaSlot) {
         MatStencil column{};
         column.i = i;
-        column.j = data.etaRule.stencilIndex(j, etaSlot);
+        column.j = data.etaRule.localIndex(j, etaSlot);
         const Block5 block = linearCombination(
             coefficients.Keta, data.etaRule.weight(1, j, etaSlot),
             coefficients.Vetaeta, -data.etaRule.weight(2, j, etaSlot));
@@ -344,8 +354,8 @@ PetscErrorCode GlobalOperator::insertValues(const Recipe &recipe,
         for (PetscInt xiSlot = 0; xiSlot < data.xiRule.stencilSize();
              ++xiSlot) {
           MatStencil column{};
-          column.i = data.xiRule.stencilIndex(i, xiSlot);
-          column.j = data.etaRule.stencilIndex(j, etaSlot);
+          column.i = data.xiRule.localIndex(i, xiSlot);
+          column.j = data.etaRule.localIndex(j, etaSlot);
           Block5 block;
           addScaled(block, coefficients.Vxieta,
                     -etaWeight * data.xiRule.weight(1, i, xiSlot));

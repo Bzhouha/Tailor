@@ -1,3 +1,7 @@
+/**
+ * @file test_lns_transforms.cpp
+ * @brief Golden-data tests for Fourier and curvilinear LNS transforms.
+ */
 #include <slepcsys.h>
 
 #include <array>
@@ -21,18 +25,21 @@ namespace {
 using BlockList = std::array<const Block5 *,
                              static_cast<std::size_t>(fourierCoefficientCount)>;
 
+/** @brief Return Fourier blocks in canonical fixture order. */
 BlockList blocks(const FourierLNSCoefficients &coefficients) {
   return {&coefficients.Gamma, &coefficients.K0,  &coefficients.Ky,
           &coefficients.Kz,    &coefficients.Vyy, &coefficients.Vyz,
           &coefficients.Vzz};
 }
 
+/** @brief Return curvilinear blocks in canonical fixture order. */
 BlockList blocks(const CurvilinearLNSCoefficients &coefficients) {
   return {&coefficients.Gamma,  &coefficients.K0,    &coefficients.Kxi,
           &coefficients.Keta,   &coefficients.Vxixi, &coefficients.Vxieta,
           &coefficients.Vetaeta};
 }
 
+/** @brief Construct one physical coefficient fixture point. */
 PhysicalLNSCoefficients referencePhysical(PetscInt point) {
   PhysicalLNSCoefficients physical;
   const std::array<Block5 *, physicalCoefficientCount> physicalBlocks = {
@@ -57,6 +64,7 @@ PhysicalLNSCoefficients referencePhysical(PetscInt point) {
   return physical;
 }
 
+/** @brief Return the Fourier wavenumber and metrics for a fixture point. */
 void referenceParameters(PetscInt point, PetscScalar &alpha,
                          MetricPoint &metrics) {
   if (point == 0) {
@@ -70,6 +78,7 @@ void referenceParameters(PetscInt point, PetscScalar &alpha,
   }
 }
 
+/** @brief Read one required string-valued PETSc option. */
 PetscErrorCode readOption(const char *name, std::string &value) {
   std::array<char, PETSC_MAX_PATH_LEN> buffer{};
   PetscBool found = PETSC_FALSE;
@@ -83,6 +92,7 @@ PetscErrorCode readOption(const char *name, std::string &value) {
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/** @brief Compare one 5-by-5 block with the text fixture stream. */
 PetscErrorCode compareBlock(std::ifstream &stream, const Block5 &actual,
                             PetscInt point, const char *stage,
                             PetscInt matrix) {
@@ -111,6 +121,7 @@ PetscErrorCode compareBlock(std::ifstream &stream, const Block5 &actual,
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/** @brief Compare all transformed blocks with Fortran golden data. */
 PetscErrorCode compareFortranGold(const std::string &goldPath) {
   std::ifstream stream(goldPath);
 
@@ -156,6 +167,7 @@ PetscErrorCode compareFortranGold(const std::string &goldPath) {
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/** @brief Verify identity metrics and invalid-input status paths. */
 PetscErrorCode validateIdentityAndFailures() {
   const PhysicalLNSCoefficients physical = referencePhysical(0);
   FourierLNSCoefficients fourier;
@@ -214,6 +226,7 @@ PetscErrorCode validateIdentityAndFailures() {
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/** @brief Transform coefficients at every node of the real case. */
 PetscErrorCode validateDistributedField(const Recipe &recipe) {
   ProblemData data;
   MetricDiagnostics metricDiagnostics;
@@ -288,6 +301,7 @@ PetscErrorCode validateDistributedField(const Recipe &recipe) {
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/** @brief Run golden, identity, failure, and distributed checks. */
 PetscErrorCode runTests() {
   std::string configPath;
   std::string goldPath;
@@ -308,6 +322,7 @@ PetscErrorCode runTests() {
 
 } // namespace
 
+/** @brief Initialize SLEPc, run transform tests, and finalize. */
 int main(int argc, char **argv) {
   PetscErrorCode error = SlepcInitialize(&argc, &argv, nullptr, nullptr);
   if (error != PETSC_SUCCESS)

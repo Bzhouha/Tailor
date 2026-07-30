@@ -1,3 +1,5 @@
+"""Collective failure tests for malformed schema-v2 FD-q inputs."""
+
 from __future__ import annotations
 
 import argparse
@@ -16,6 +18,7 @@ Mutation = Callable[[h5py.File], None]
 
 
 def fdq_path(config_path: Path) -> Path:
+    """Resolve the prepared FD-q file used by a YAML config."""
     with config_path.open("r", encoding="utf-8") as stream:
         config = yaml.safe_load(stream)
     folder = Path(config["Folder"])
@@ -32,14 +35,17 @@ def fdq_path(config_path: Path) -> Path:
 
 
 def missing_weight(handle: h5py.File) -> None:
+    """Remove a required derivative-weight dataset."""
     del handle["discretization/y/weights/d1"]
 
 
 def wrong_q(handle: h5py.File) -> None:
+    """Make a group polynomial degree disagree with root metadata."""
     handle.attrs["q_y"] = int(handle.attrs["q_y"]) - 1
 
 
 def wrong_shape(handle: h5py.File) -> None:
+    """Replace stencil indices with an incorrectly shaped dataset."""
     weights = handle["discretization/y/weights"]
     truncated = np.asarray(weights["d2"][:, :-1])
     del weights["d2"]
@@ -47,11 +53,13 @@ def wrong_shape(handle: h5py.File) -> None:
 
 
 def out_of_range_index(handle: h5py.File) -> None:
+    """Inject a periodic stencil index beyond the node count."""
     indices = handle["discretization/y/stencil_indices"]
     indices[0, 0] = int(handle.attrs["Ny"])
 
 
 def non_finite_weight(handle: h5py.File) -> None:
+    """Inject a non-finite differentiation weight."""
     handle["discretization/y/weights/d1"][0, 0] = np.nan
 
 
@@ -70,6 +78,7 @@ def create_case(
     source_fdq: Path,
     mutation: Mutation,
 ) -> Path:
+    """Copy a valid case and apply one HDF5 corruption."""
     case = root / "case"
     case.mkdir(parents=True)
     target_config = case / "config.yaml"
@@ -85,6 +94,7 @@ def create_case(
 def assert_collective_failure(
     command: list[str], expected_message: str, scenario: str
 ) -> None:
+    """Check serial/MPI failure text and guard against hangs."""
     completed = subprocess.run(
         command,
         text=True,
@@ -105,6 +115,7 @@ def assert_collective_failure(
 
 
 def main() -> int:
+    """Run every malformed-input scenario in serial and with two ranks."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--solver", required=True, type=Path)
     parser.add_argument("--config", required=True, type=Path)
@@ -121,7 +132,12 @@ def main() -> int:
             invalid_config = create_case(
                 Path(temporary), config, source_fdq, mutation
             )
-            serial = [str(solver), "-c", str(invalid_config)]
+            serial = [
+                str(solver),
+                "-c",
+                str(invalid_config),
+                "-tailor_assemble_only",
+            ]
             parallel = [
                 str(mpiexec),
                 "-n",

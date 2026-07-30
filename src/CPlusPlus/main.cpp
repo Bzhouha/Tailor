@@ -9,7 +9,9 @@
 namespace {
 
 constexpr char help[] = "Tailor: a temporal BiGlobal eigenvalue solver.\n"
-                        "  -c <file>  YAML configuration file (required)\n";
+                        "  -c <file>  YAML configuration file (required)\n"
+                        "  -tailor_assemble_only  Validate matrices without "
+                        "running EPSSolve\n";
 
 } // namespace
 

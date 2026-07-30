@@ -7,6 +7,9 @@
 #include <array>
 
 #include "BaseFlowDerivatives.hpp"
+#include "BoundaryConditions.hpp"
+#include "EigenOutput.hpp"
+#include "EigenSolver.hpp"
 #include "GlobalOperator.hpp"
 #include "Metrics.hpp"
 #include "Parser.hpp"
@@ -35,6 +38,11 @@ PetscErrorCode Process::run() const {
   MetricDiagnostics metricDiagnostics;
   BaseFlowDerivativeDiagnostics derivativeDiagnostics;
   GlobalOperatorDiagnostics operatorDiagnostics;
+  BoundaryConditionDiagnostics boundaryDiagnostics;
+  EigenSolution eigenSolution;
+  EigenSolverDiagnostics eigenDiagnostics;
+  EigenOutputDiagnostics outputDiagnostics;
+  PetscBool assembleOnly = PETSC_FALSE;
   PetscReal baseflowNorm = 0.0;
   PetscReal gridNorm = 0.0;
 
@@ -45,6 +53,9 @@ PetscErrorCode Process::run() const {
   PetscCall(Metrics(comm_).compute(data, metricDiagnostics));
   PetscCall(BaseFlowDerivatives(comm_).compute(data, derivativeDiagnostics));
   PetscCall(GlobalOperator(comm_).assemble(recipe, data, operatorDiagnostics));
+  PetscCall(BoundaryConditions(comm_).apply(recipe, data, boundaryDiagnostics));
+  PetscCall(PetscOptionsHasName(nullptr, nullptr, "-tailor_assemble_only",
+                                &assembleOnly));
 
   PetscCall(VecNorm(data.baseflow, NORM_2, &baseflowNorm));
   PetscCall(VecNorm(data.grid, NORM_2, &gridNorm));
@@ -122,7 +133,47 @@ PetscErrorCode Process::run() const {
       static_cast<double>(operatorDiagnostics.spatialAllocatedBlocks),
       static_cast<double>(operatorDiagnostics.spatialFrobeniusNorm)));
 
-  // Subsequent stages will be added here in order:
-  // boundary conditions -> EPS solve -> output.
+  PetscCall(PetscPrintf(
+      comm_,
+      "  boundaries: wall nodes=%" PetscInt_FMT
+      ", far-field nodes=%" PetscInt_FMT "\n"
+      "  far-field incoming modes=%" PetscInt_FMT " (per node %" PetscInt_FMT
+      "..%" PetscInt_FMT "), neutral modes=%" PetscInt_FMT "\n"
+      "  max characteristic |imag(c)|: %.16g; max cond(R): %.16g\n"
+      "  ||A_bc||F: %.16g; ||B_bc||F: %.16g\n",
+      boundaryDiagnostics.wallNodes, boundaryDiagnostics.farfieldNodes,
+      boundaryDiagnostics.incomingModes,
+      boundaryDiagnostics.minIncomingModesPerNode,
+      boundaryDiagnostics.maxIncomingModesPerNode,
+      boundaryDiagnostics.neutralModes,
+      static_cast<double>(boundaryDiagnostics.maxCharacteristicImaginary),
+      static_cast<double>(boundaryDiagnostics.maxEigenvectorCondition),
+      static_cast<double>(boundaryDiagnostics.eigenFrobeniusNorm),
+      static_cast<double>(boundaryDiagnostics.eigenMassFrobeniusNorm)));
+
+  if (assembleOnly) {
+    PetscCall(PetscPrintf(
+        comm_,
+        "  assemble-only: boundary matrices validated; EPSSolve skipped\n"));
+  } else {
+    PetscCall(EigenSolver(comm_).solve(recipe, data, eigenSolution,
+                                       eigenDiagnostics));
+    PetscCall(PetscPrintf(
+        comm_,
+        "  eigensolver: requested=%" PetscInt_FMT ", converged=%" PetscInt_FMT
+        ", iterations=%" PetscInt_FMT "\n"
+        "  lambda target: %.16g %+.16gi; max relative error: %.16g\n",
+        eigenDiagnostics.requested, eigenDiagnostics.converged,
+        eigenDiagnostics.iterations,
+        static_cast<double>(PetscRealPart(eigenDiagnostics.targetLambda)),
+        static_cast<double>(PetscImaginaryPart(eigenDiagnostics.targetLambda)),
+        static_cast<double>(eigenDiagnostics.maximumRelativeError)));
+    PetscCall(EigenOutput(comm_).write(recipe, data, eigenSolution,
+                                       eigenDiagnostics, outputDiagnostics));
+    PetscCall(PetscPrintf(comm_, "  output: %s (%" PetscInt_FMT " modes)\n",
+                          outputDiagnostics.file.c_str(),
+                          outputDiagnostics.modesWritten));
+  }
+
   PetscFunctionReturn(PETSC_SUCCESS);
 }

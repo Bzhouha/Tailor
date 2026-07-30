@@ -19,15 +19,25 @@ using FlowState =
 /** @brief Base-flow state and all physical derivatives required by the LNS
  * model. */
 struct BaseFlowPoint {
+  /** Basic-flow primitive state. */
   FlowState value{};
+  /** First physical x derivative. */
   FlowState dx{};
+  /** First physical y derivative. */
   FlowState dy{};
+  /** First physical z derivative. */
   FlowState dz{};
+  /** Second physical xx derivative. */
   FlowState dxx{};
+  /** Second physical yy derivative. */
   FlowState dyy{};
+  /** Second physical zz derivative. */
   FlowState dzz{};
+  /** Mixed physical xy derivative. */
   FlowState dxy{};
+  /** Mixed physical xz derivative. */
   FlowState dxz{};
+  /** Mixed physical yz derivative. */
   FlowState dyz{};
 };
 
@@ -54,25 +64,53 @@ public:
   [[nodiscard]] bool finite() const noexcept;
 
 private:
+  /** Contiguous row-major matrix entries. */
   std::array<PetscScalar, 25> values_{};
 };
 
 /** @brief Eleven physical-space coefficient blocks of the compressible LNS
  * system. */
 struct PhysicalLNSCoefficients {
+  /** Generalized time/mass block. */
   Block5 Gamma;
+  /** Inviscid/viscous physical x first-derivative block. */
   Block5 A;
+  /** Inviscid/viscous physical y first-derivative block. */
   Block5 B;
+  /** Inviscid/viscous physical z first-derivative block. */
   Block5 C;
+  /** Zeroth-order physical block. */
   Block5 D;
+  /** Physical xx viscous block. */
   Block5 Vxx;
+  /** Physical xy viscous block. */
   Block5 Vxy;
+  /** Physical xz viscous block. */
   Block5 Vxz;
+  /** Physical yy viscous block. */
   Block5 Vyy;
+  /** Physical yz viscous block. */
   Block5 Vyz;
+  /** Physical zz viscous block. */
   Block5 Vzz;
 
   /** @brief Test that all coefficient blocks are finite. */
+  [[nodiscard]] bool finite() const noexcept;
+};
+
+/**
+ * @brief Inviscid physical-space blocks used by the far-field
+ * characteristic boundary condition.
+ */
+struct InviscidLNSCoefficients {
+  /** Generalized time/mass block. */
+  Block5 Gamma;
+  /** Inviscid physical-y flux Jacobian. */
+  Block5 Bc;
+  /** Inviscid physical-z flux Jacobian. */
+  Block5 Cc;
+
+  /** @brief Test that all three coefficient blocks are finite. */
   [[nodiscard]] bool finite() const noexcept;
 };
 
@@ -123,10 +161,25 @@ public:
   evaluate(const BaseFlowPoint &flow,
            PhysicalLNSCoefficients &coefficients) const noexcept;
 
+  /**
+   * @brief Evaluate the inviscid mass and y/z flux-Jacobian blocks.
+   *
+   * These are the canonical `G`, `B_c`, and `C_c` blocks from
+   * `mod_cubes.f90/get_unadorned_cubes`.
+   */
+  [[nodiscard]] CoefficientStatus
+  evaluateInviscid(const BaseFlowPoint &flow,
+                   InviscidLNSCoefficients &coefficients) const noexcept;
+
 private:
+  /** Reynolds number. */
   PetscReal reynolds_;
+  /** Mach number. */
   PetscReal mach_;
+  /** Prandtl number. */
   PetscReal prandtl_;
+  /** Ratio of specific heats. */
   PetscReal gamma_;
+  /** Dimensionless Sutherland constant \f$S/T_{\rm ref}\f$. */
   PetscReal sutherlandRatio_;
 };

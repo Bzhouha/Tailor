@@ -1,3 +1,5 @@
+!> @file generate_lns_transform_gold.f90
+!! @brief Generate trusted Fourier and curvilinear transformation fixtures.
 program generate_lns_transform_gold
   implicit none
   integer, parameter :: dp = kind(1.0d0)
@@ -45,6 +47,9 @@ program generate_lns_transform_gold
 
 contains
 
+!> @brief Construct deterministic physical-space coefficient matrices.
+!! @param[in] point Fixture point identifier.
+!! @param[out] physical Eleven physical coefficient matrices.
 subroutine make_physical(point, physical)
   implicit none
   integer, intent(in) :: point
@@ -64,6 +69,10 @@ subroutine make_physical(point, physical)
   end do
 end subroutine make_physical
 
+!> @brief Construct a complex wave number and nontrivial metric coefficients.
+!! @param[in] point Fixture point identifier.
+!! @param[out] alpha Complex streamwise wave number.
+!! @param[out] metrics Ten first- and second-order metric coefficients.
 subroutine make_parameters(point, alpha, metrics)
   implicit none
   integer, intent(in) :: point
@@ -83,6 +92,10 @@ subroutine make_parameters(point, alpha, metrics)
   end if
 end subroutine make_parameters
 
+!> @brief Apply the streamwise Fourier substitution to physical coefficients.
+!! @param[in] physical Eleven physical coefficient matrices.
+!! @param[in] alpha Complex streamwise wave number.
+!! @param[out] fourier Seven Fourier-space coefficient matrices.
 subroutine streamwise_fourier(physical, alpha, fourier)
   implicit none
   complex(dp), intent(in) :: physical(5,5,11), alpha
@@ -100,6 +113,10 @@ subroutine streamwise_fourier(physical, alpha, fourier)
   fourier(:,:,7) = physical(:,:,11)
 end subroutine streamwise_fourier
 
+!> @brief Transform Fourier-space coefficients to computational coordinates.
+!! @param[in] fourier Seven Fourier-space coefficient matrices.
+!! @param[in] metric Ten curvilinear metric coefficients.
+!! @param[out] curvilinear Seven computational-space coefficient matrices.
 subroutine curvilinear_transform(fourier, metric, curvilinear)
   implicit none
   complex(dp), intent(in) :: fourier(5,5,7)

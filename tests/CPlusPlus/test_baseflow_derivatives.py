@@ -1,3 +1,5 @@
+"""MPI integration tests for physical base-flow derivatives."""
+
 from __future__ import annotations
 
 import argparse
@@ -18,6 +20,7 @@ Mutation = Callable[[h5py.File], None]
 
 
 def fdq_path(config_path: Path) -> Path:
+    """Resolve the prepared FD-q file associated with a test config."""
     with config_path.open("r", encoding="utf-8") as stream:
         config = yaml.safe_load(stream)
     source = Path(config["File"])
@@ -35,16 +38,28 @@ def fdq_path(config_path: Path) -> Path:
 def differentiate_xi(
     values: np.ndarray, indices: np.ndarray, weights: np.ndarray
 ) -> np.ndarray:
+    """Apply a bounded xi differentiation rule to a tensor field."""
     return np.einsum("jis,is->ji", values[:, indices], weights)
 
 
 def differentiate_eta(
-    values: np.ndarray, indices: np.ndarray, weights: np.ndarray
+    values: np.ndarray,
+    indices: np.ndarray,
+    offsets: np.ndarray,
+    weights: np.ndarray,
+    translation: float = 0.0,
 ) -> np.ndarray:
-    return np.einsum("jsi,js->ji", values[indices, :], weights)
+    """Apply a periodic eta rule, optionally unwrapping a translation."""
+    sampled = values[indices, :]
+    if translation != 0.0:
+        rows = np.arange(indices.shape[0], dtype=np.int64)[:, None]
+        wraps = (rows + offsets - indices) // indices.shape[0]
+        sampled = sampled + wraps[:, :, None] * translation
+    return np.einsum("jsi,js->ji", sampled, weights)
 
 
 def reference_derivatives(path: Path) -> np.ndarray:
+    """Compute independent physical derivative norms from HDF5 data."""
     with h5py.File(path, "r") as handle:
         ny = int(handle.attrs["Ny"])
         nz = int(handle.attrs["Nz"])
@@ -58,6 +73,10 @@ def reference_derivatives(path: Path) -> np.ndarray:
         eta_indices = np.asarray(
             handle["discretization/z/stencil_indices"], dtype=np.int64
         )
+        eta_offsets = np.asarray(
+            handle["discretization/z/stencil_offsets"], dtype=np.int64
+        )
+        spanwise_period = float(handle.attrs["spanwise_period"])
         xi_d1 = np.asarray(
             handle["discretization/y/weights/d1"], dtype=np.float64
         )
@@ -72,9 +91,13 @@ def reference_derivatives(path: Path) -> np.ndarray:
         )
 
     dxi = lambda values: differentiate_xi(values, xi_indices, xi_d1)
-    deta = lambda values: differentiate_eta(values, eta_indices, eta_d1)
+    deta = lambda values: differentiate_eta(
+        values, eta_indices, eta_offsets, eta_d1
+    )
     dxixi = lambda values: differentiate_xi(values, xi_indices, xi_d2)
-    detaeta = lambda values: differentiate_eta(values, eta_indices, eta_d2)
+    detaeta = lambda values: differentiate_eta(
+        values, eta_indices, eta_offsets, eta_d2
+    )
     dxieta = lambda values: deta(dxi(values))
 
     y = grid[:, :, 1]
@@ -82,7 +105,13 @@ def reference_derivatives(path: Path) -> np.ndarray:
     y_xi = dxi(y)
     y_eta = deta(y)
     z_xi = dxi(z)
-    z_eta = deta(z)
+    z_eta = differentiate_eta(
+        z,
+        eta_indices,
+        eta_offsets,
+        eta_d1,
+        translation=spanwise_period,
+    )
     jacobian = y_xi * z_eta - y_eta * z_xi
     xi_y = z_eta / jacobian
     xi_z = -y_eta / jacobian
@@ -132,7 +161,13 @@ def reference_derivatives(path: Path) -> np.ndarray:
 def solver_command(
     solver: Path, config: Path, mpiexec: Path | None
 ) -> list[str]:
-    command = [str(solver), "-c", str(config)]
+    """Build an assemble-only serial or two-rank solver command."""
+    command = [
+        str(solver),
+        "-c",
+        str(config),
+        "-tailor_assemble_only",
+    ]
     if mpiexec is not None:
         command = [str(mpiexec), "-n", "2", *command]
     return command
@@ -141,6 +176,7 @@ def solver_command(
 def run_solver(
     solver: Path, config: Path, mpiexec: Path | None
 ) -> subprocess.CompletedProcess[str]:
+    """Run one solver scenario and capture combined output."""
     return subprocess.run(
         solver_command(solver, config, mpiexec),
         text=True,
@@ -152,6 +188,7 @@ def run_solver(
 
 
 def parse_norms(output: str) -> np.ndarray:
+    """Extract the 25 derivative norms from solver diagnostics."""
     norms = []
     for derivative in DERIVATIVE_NAMES:
         match = re.search(
@@ -173,6 +210,7 @@ def assert_success(
     mpiexec: Path | None,
     scenario: str,
 ) -> None:
+    """Compare solver derivative norms with the independent reference."""
     completed = run_solver(solver, config, mpiexec)
     if completed.returncode != 0:
         raise AssertionError(
@@ -194,6 +232,7 @@ def create_case(
     source_fdq: Path,
     mutation: Mutation,
 ) -> Path:
+    """Copy a case, mutate its prepared HDF5 file, and return its config."""
     case = root / "case"
     case.mkdir(parents=True)
     target_config = case / "config.yaml"
@@ -207,24 +246,34 @@ def create_case(
 
 
 def make_manufactured_case(handle: h5py.File) -> None:
+    """Install a periodic curved grid and fully varying positive base flow."""
     xi = np.asarray(handle["discretization/y/nodes"])
     eta = np.asarray(handle["discretization/z/nodes"])
     xi_grid, eta_grid = np.meshgrid(xi, eta, indexing="xy")
     ny = xi.size
     nz = eta.size
+    computational_period = float(
+        handle["discretization/z"].attrs["period"]
+    )
+    physical_period = float(handle.attrs["spanwise_period"])
+    theta = 2.0 * np.pi * (eta_grid - eta[0]) / computational_period
+    phase = (eta_grid - eta[0]) / computational_period
+    sine = np.sin(theta)
+    cosine = np.cos(theta)
+    sine2 = np.sin(2.0 * theta)
 
     grid = np.asarray(handle["grid"]).reshape(nz, ny, 3, 2)
     grid[:, :, 1, 0] = (
         2.0 * xi_grid
-        + 0.25 * eta_grid
-        + 0.08 * xi_grid * eta_grid
         + 0.03 * xi_grid**2
+        + 0.12 * sine
+        + 0.05 * xi_grid * sine
     )
     grid[:, :, 2, 0] = (
+        physical_period * phase
         -0.15 * xi_grid
-        + 1.7 * eta_grid
-        + 0.05 * xi_grid * eta_grid
-        + 0.04 * eta_grid**2
+        + 0.08 * cosine
+        + 0.04 * xi_grid * cosine
     )
     grid[:, :, 1:3, 1] = 0.0
     handle["grid"][:] = grid.reshape(ny * nz, 3, 2)
@@ -233,58 +282,62 @@ def make_manufactured_case(handle: h5py.File) -> None:
     baseflow[:, :, 0, 0] = (
         1.2
         + 0.08 * xi_grid
-        + 0.04 * eta_grid
-        + 0.03 * xi_grid * eta_grid
         + 0.02 * xi_grid**2
+        + 0.04 * sine
+        + 0.03 * xi_grid * cosine
     )
     baseflow[:, :, 1, 0] = (
         2.4
         + 0.20 * xi_grid
-        - 0.07 * eta_grid
-        + 0.04 * xi_grid * eta_grid
-        + 0.05 * eta_grid**2
+        - 0.07 * cosine
+        + 0.04 * xi_grid * sine
+        + 0.025 * sine2
     )
     baseflow[:, :, 2, 0] = (
         0.12
         - 0.03 * xi_grid
-        + 0.06 * eta_grid
-        + 0.02 * xi_grid * eta_grid
         + 0.01 * xi_grid**2
+        + 0.06 * sine
+        + 0.02 * xi_grid * cosine
     )
     baseflow[:, :, 3, 0] = (
         -0.08
         + 0.05 * xi_grid
-        + 0.04 * eta_grid
-        - 0.025 * xi_grid * eta_grid
-        + 0.015 * eta_grid**2
+        + 0.04 * cosine
+        - 0.025 * xi_grid * sine
+        + 0.015 * sine2
     )
     baseflow[:, :, 4, 0] = (
         1.5
         + 0.09 * xi_grid
-        + 0.05 * eta_grid
-        + 0.035 * xi_grid * eta_grid
         + 0.025 * xi_grid**2
-        + 0.02 * eta_grid**2
+        + 0.05 * sine
+        + 0.035 * xi_grid * cosine
+        + 0.02 * sine2
     )
     baseflow[:, :, :, 1] = 0.0
     handle["baseflow"][:] = baseflow.reshape(ny * nz, 5, 2)
 
 
 def make_complex_baseflow(handle: h5py.File) -> None:
+    """Inject a nonzero imaginary basic-flow component."""
     baseflow = np.asarray(handle["baseflow"])
     baseflow[:, 1, 1] = 1.0e-6
     handle["baseflow"][:] = baseflow
 
 
 def make_nonpositive_density(handle: h5py.File) -> None:
+    """Inject an invalid zero density."""
     handle["baseflow"][0, 0, 0] = 0.0
 
 
 def make_nonpositive_temperature(handle: h5py.File) -> None:
+    """Inject an invalid negative temperature."""
     handle["baseflow"][0, 4, 0] = -1.0
 
 
 def make_nonfinite_baseflow(handle: h5py.File) -> None:
+    """Inject a NaN basic-flow component."""
     handle["baseflow"][0, 2, 0] = np.nan
 
 
@@ -295,6 +348,7 @@ def assert_failure(
     message: str,
     scenario: str,
 ) -> None:
+    """Require an invalid case to fail collectively with a diagnostic."""
     completed = run_solver(solver, config, mpiexec)
     if completed.returncode == 0:
         raise AssertionError(f"{scenario}: invalid base flow succeeded")
@@ -305,6 +359,7 @@ def assert_failure(
 
 
 def main() -> int:
+    """Run real, manufactured, serial, MPI, and failure scenarios."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--solver", required=True, type=Path)
     parser.add_argument("--config", required=True, type=Path)

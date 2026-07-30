@@ -1,3 +1,7 @@
+/**
+ * @file verify_sample_load.cpp
+ * @brief Verify PETSc natural-vector loading from a prepared sample file.
+ */
 #include <petscdmda.h>
 #include <petscviewerhdf5.h>
 #include <slepcsys.h>
@@ -7,6 +11,7 @@
 
 namespace {
 
+/** @brief Load a PETSc natural vector and scatter it into a DMDA vector. */
 PetscErrorCode loadNaturalVector(PetscViewer viewer, DM dm, const char *name,
                                  Vec *global) {
   Vec natural = nullptr;
@@ -22,8 +27,9 @@ PetscErrorCode loadNaturalVector(PetscViewer viewer, DM dm, const char *name,
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-}  // namespace
+} // namespace
 
+/** @brief Load grid/base-flow datasets and report their distributed norms. */
 int main(int argc, char **argv) {
   if (argc != 2) {
     std::cerr << "Usage: " << argv[0] << " INPUT.h5\n";
@@ -44,16 +50,16 @@ int main(int argc, char **argv) {
   PetscReal grid_norm = 0.0;
 
   PetscCall(SlepcInitialize(&argc, &argv, nullptr, nullptr));
-  PetscCall(PetscViewerHDF5Open(PETSC_COMM_WORLD, input_path.c_str(), FILE_MODE_READ,
-                                &viewer));
-  PetscCall(PetscViewerHDF5ReadAttribute(viewer, "/", "Ny", PETSC_INT, nullptr,
-                                         &ny));
-  PetscCall(PetscViewerHDF5ReadAttribute(viewer, "/", "Nz", PETSC_INT, nullptr,
-                                         &nz));
+  PetscCall(PetscViewerHDF5Open(PETSC_COMM_WORLD, input_path.c_str(),
+                                FILE_MODE_READ, &viewer));
+  PetscCall(
+      PetscViewerHDF5ReadAttribute(viewer, "/", "Ny", PETSC_INT, nullptr, &ny));
+  PetscCall(
+      PetscViewerHDF5ReadAttribute(viewer, "/", "Nz", PETSC_INT, nullptr, &nz));
 
   PetscCall(DMDACreate2d(PETSC_COMM_WORLD, DM_BOUNDARY_NONE, DM_BOUNDARY_NONE,
-                         DMDA_STENCIL_BOX, ny, nz, PETSC_DECIDE, PETSC_DECIDE, 5,
-                         4, nullptr, nullptr, &field_dm));
+                         DMDA_STENCIL_BOX, ny, nz, PETSC_DECIDE, PETSC_DECIDE,
+                         5, 4, nullptr, nullptr, &field_dm));
   PetscCall(DMSetUp(field_dm));
   PetscCall(DMDACreateCompatibleDMDA(field_dm, 3, &grid_dm));
   PetscCall(DMSetUp(grid_dm));
@@ -62,10 +68,10 @@ int main(int argc, char **argv) {
   PetscCall(loadNaturalVector(viewer, grid_dm, "grid", &grid));
   PetscCall(VecGetSize(baseflow, &baseflow_size));
   PetscCall(VecGetSize(grid, &grid_size));
-  PetscCheck(baseflow_size == ny * nz * 5, PETSC_COMM_WORLD, PETSC_ERR_FILE_UNEXPECTED,
-             "Unexpected baseflow size");
-  PetscCheck(grid_size == ny * nz * 3, PETSC_COMM_WORLD, PETSC_ERR_FILE_UNEXPECTED,
-             "Unexpected grid size");
+  PetscCheck(baseflow_size == ny * nz * 5, PETSC_COMM_WORLD,
+             PETSC_ERR_FILE_UNEXPECTED, "Unexpected baseflow size");
+  PetscCheck(grid_size == ny * nz * 3, PETSC_COMM_WORLD,
+             PETSC_ERR_FILE_UNEXPECTED, "Unexpected grid size");
   PetscCall(VecNorm(baseflow, NORM_2, &baseflow_norm));
   PetscCall(VecNorm(grid, NORM_2, &grid_norm));
   PetscCall(PetscPrintf(PETSC_COMM_WORLD,

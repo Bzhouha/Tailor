@@ -1,3 +1,7 @@
+/**
+ * @file test_lns_coefficients.cpp
+ * @brief Golden-data and distributed-field tests for physical LNS blocks.
+ */
 #include <slepcsys.h>
 
 #include <array>
@@ -17,6 +21,7 @@ namespace {
 
 constexpr PetscInt matrixCount = physicalCoefficientCount;
 
+/** @brief Return physical blocks in canonical fixture order. */
 std::array<const Block5 *, static_cast<std::size_t>(matrixCount)>
 blocks(const PhysicalLNSCoefficients &coefficients) {
   return {&coefficients.Gamma, &coefficients.A,   &coefficients.B,
@@ -25,10 +30,12 @@ blocks(const PhysicalLNSCoefficients &coefficients) {
           &coefficients.Vyz,   &coefficients.Vzz};
 }
 
+/** @brief Assign a real five-component flow tuple. */
 void setState(FlowState &state, std::array<PetscReal, 5> values) {
   state = values;
 }
 
+/** @brief Construct two nontrivial points used by the Fortran fixture. */
 std::array<BaseFlowPoint, 2> referencePoints() {
   std::array<BaseFlowPoint, 2> points{};
   auto &first = points[0];
@@ -53,6 +60,7 @@ std::array<BaseFlowPoint, 2> referencePoints() {
   return points;
 }
 
+/** @brief Read one required string-valued PETSc option. */
 PetscErrorCode readOption(const char *name, std::string &value) {
   std::array<char, PETSC_MAX_PATH_LEN> buffer{};
   PetscBool found = PETSC_FALSE;
@@ -66,6 +74,7 @@ PetscErrorCode readOption(const char *name, std::string &value) {
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/** @brief Compare every physical block with canonical Fortran data. */
 PetscErrorCode compareFortranGold(const Recipe &recipe,
                                   const std::string &goldPath) {
   std::ifstream stream(goldPath);
@@ -129,6 +138,7 @@ PetscErrorCode compareFortranGold(const Recipe &recipe,
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/** @brief Evaluate finite coefficients at every node of the real case. */
 PetscErrorCode validateDistributedField(const Recipe &recipe) {
   ProblemData data;
   MetricDiagnostics metricDiagnostics;
@@ -185,6 +195,7 @@ PetscErrorCode validateDistributedField(const Recipe &recipe) {
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/** @brief Run golden-data and distributed coefficient checks. */
 PetscErrorCode runTests() {
   std::string configPath;
   std::string goldPath;
@@ -204,6 +215,7 @@ PetscErrorCode runTests() {
 
 } // namespace
 
+/** @brief Initialize SLEPc, run coefficient tests, and finalize. */
 int main(int argc, char **argv) {
   PetscErrorCode error = SlepcInitialize(&argc, &argv, nullptr, nullptr);
   if (error != PETSC_SUCCESS)

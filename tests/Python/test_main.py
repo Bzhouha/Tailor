@@ -1,3 +1,5 @@
+"""Unit tests for the Python preprocessing and C++ launch driver."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -8,7 +10,11 @@ from src.Python.main import CaseConfiguration, main, solver_command
 
 
 class SolverCommandTests(unittest.TestCase):
+    """Verify construction of serial and MPI solver commands."""
+
     def test_serial_command(self) -> None:
+        """Forward PETSc options to a serial solver invocation."""
+
         self.assertEqual(
             solver_command(
                 Path("/tmp/tailor"),
@@ -27,6 +33,8 @@ class SolverCommandTests(unittest.TestCase):
         )
 
     def test_mpi_command(self) -> None:
+        """Prefix a multi-process invocation with the selected launcher."""
+
         self.assertEqual(
             solver_command(
                 Path("/tmp/tailor"),
@@ -45,6 +53,8 @@ class SolverCommandTests(unittest.TestCase):
         )
 
     def test_rejects_invalid_process_count(self) -> None:
+        """Reject zero or negative MPI process counts."""
+
         with self.assertRaisesRegex(ValueError, "at least 1"):
             solver_command(
                 Path("/tmp/tailor"), Path("/tmp/config.yaml"), 0, None
@@ -52,7 +62,11 @@ class SolverCommandTests(unittest.TestCase):
 
 
 class DriverTests(unittest.TestCase):
+    """Verify preprocessing/solver sequencing and status propagation."""
+
     def setUp(self) -> None:
+        """Create the common resolved case used by mocked driver tests."""
+
         self.case = CaseConfiguration(
             config_path=Path("/tmp/config.yaml"),
             source_h5=Path("/tmp/sample.h5"),
@@ -70,6 +84,8 @@ class DriverTests(unittest.TestCase):
         run: mock.Mock,
         find_solver: mock.Mock,
     ) -> None:
+        """Launch C++ only after successful preprocessing."""
+
         load_config.return_value = self.case
         find_solver.return_value = Path("/build/tailor")
         run.side_effect = [
@@ -96,6 +112,8 @@ class DriverTests(unittest.TestCase):
         run: mock.Mock,
         find_solver: mock.Mock,
     ) -> None:
+        """Return a preprocessing error without starting C++."""
+
         load_config.return_value = self.case
         run.return_value = mock.Mock(returncode=7)
 
@@ -114,6 +132,8 @@ class DriverTests(unittest.TestCase):
         run: mock.Mock,
         find_solver: mock.Mock,
     ) -> None:
+        """Propagate the C++ solver's nonzero exit status."""
+
         load_config.return_value = self.case
         find_solver.return_value = Path("/build/tailor")
         run.side_effect = [
@@ -133,6 +153,8 @@ class DriverTests(unittest.TestCase):
         load_config: mock.Mock,
         run: mock.Mock,
     ) -> None:
+        """Honor prepare-only without resolving or launching C++."""
+
         load_config.return_value = self.case
         run.return_value = mock.Mock(returncode=0)
 
@@ -152,6 +174,8 @@ class DriverTests(unittest.TestCase):
         find_solver: mock.Mock,
         find_mpiexec: mock.Mock,
     ) -> None:
+        """Forward MPI and PETSc arguments through the official driver."""
+
         load_config.return_value = self.case
         find_solver.return_value = Path("/build/tailor")
         find_mpiexec.return_value = Path("/petsc/bin/mpiexec")

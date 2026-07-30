@@ -11,6 +11,12 @@
 #include <cstddef>
 #include <vector>
 
+/** @brief One-dimensional grid topology used by an FD-q rule. */
+enum class FDQTopology {
+  Bounded,
+  Periodic,
+};
+
 /**
  * @brief Replicated one-dimensional local differentiation rule.
  *
@@ -18,19 +24,25 @@
  * `(node, stencil slot)` and `weights[0..2]` stores d0, d1, and d2.
  */
 struct FDQRuleData {
-  /** Number of intervals; the rule contains N+1 nodes. */
-  PetscInt N = 0;
+  /** Number of unique nodes represented by the rule. */
+  PetscInt nodeCountValue = 0;
   /** Local interpolation degree; every stencil contains q+1 nodes. */
   PetscInt q = 0;
+  /** Bounded interval or periodic half-open topology. */
+  FDQTopology topology = FDQTopology::Bounded;
+  /** Computational-coordinate period; 2 for the current normalized grids. */
+  PetscReal period = 2.0;
   /** Strictly increasing computational coordinates. */
   std::vector<PetscReal> nodes;
   /** Global one-dimensional node index for every stencil entry. */
   std::vector<PetscInt> stencilIndices;
+  /** Unwrapped index displacement for every stencil entry. */
+  std::vector<PetscInt> stencilOffsets;
   /** Flattened interpolation and first/second derivative weights. */
   std::array<std::vector<PetscReal>, 3> weights;
 
   /** @brief Return the number of grid nodes represented by the rule. */
-  [[nodiscard]] PetscInt nodeCount() const noexcept { return N + 1; }
+  [[nodiscard]] PetscInt nodeCount() const noexcept { return nodeCountValue; }
   /** @brief Return the number of entries in each local stencil. */
   [[nodiscard]] PetscInt stencilSize() const noexcept { return q + 1; }
 
@@ -51,6 +63,22 @@ struct FDQRuleData {
                                       PetscInt slot) const noexcept {
     return stencilIndices[flatIndex(row, slot)];
   }
+
+  /** @brief Return the unwrapped local-array displacement for a stencil slot.
+   */
+  [[nodiscard]] PetscInt stencilOffset(PetscInt row,
+                                       PetscInt slot) const noexcept {
+    return stencilOffsets[flatIndex(row, slot)];
+  }
+
+  /** @brief Return the local unwrapped index used for Ghost Vec access. */
+  [[nodiscard]] PetscInt localIndex(PetscInt row,
+                                    PetscInt slot) const noexcept {
+    return row + stencilOffset(row, slot);
+  }
+
+  /** @brief Return the largest absolute stencil displacement. */
+  [[nodiscard]] PetscInt maxAbsOffset() const noexcept;
 
   /**
    * @brief Return an interpolation or derivative weight.
@@ -96,6 +124,8 @@ struct ProblemData {
   PetscInt nz = 0;
   /** BOX ghost width used by compatible DMDAs. */
   PetscInt stencilWidth = 0;
+  /** Physical translation length of the periodic spanwise coordinate. */
+  PetscReal spanwisePeriod = 0.0;
 
   /** Five-DOF state DMDA ordered as rho, U, V, W, T. */
   DM fieldDM = nullptr;
@@ -117,6 +147,10 @@ struct ProblemData {
   Mat massMatrix = nullptr;
   /** Block-size-five unconstrained spatial matrix L. */
   Mat spatialMatrix = nullptr;
+  /** Boundary-constrained eigenvalue matrix A_bc=-L with row replacements. */
+  Mat eigenMatrix = nullptr;
+  /** Boundary-constrained generalized mass matrix B_bc. */
+  Mat eigenMassMatrix = nullptr;
 
   /** HDF5 y rule, interpreted as differentiation in computational xi. */
   FDQRuleData xiRule;

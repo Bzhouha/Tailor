@@ -15,6 +15,7 @@
 
 namespace {
 
+/** @brief Read one required typed YAML child value. */
 template <typename T> T required(const YAML::Node &node, const char *key) {
   const YAML::Node value = node[key];
   if (!value)
@@ -22,6 +23,7 @@ template <typename T> T required(const YAML::Node &node, const char *key) {
   return value.as<T>();
 }
 
+/** @brief Reject a non-finite configuration scalar. */
 void requireFinite(double value, const char *name) {
   if (!std::isfinite(value)) {
     throw std::runtime_error(std::string(name) + " must be finite");
@@ -65,6 +67,32 @@ Recipe Parser::parseOnRoot(const std::string &yamlConfig) {
   recipe.alpha = {required<double>(alpha, "Real"),
                   required<double>(alpha, "Imag")};
 
+  const YAML::Node eigenSolver = root["EigenSolver"];
+  if (!eigenSolver || !eigenSolver.IsMap())
+    throw std::runtime_error("Missing or invalid YAML mapping: EigenSolver");
+  const YAML::Node searchCenter = eigenSolver["SearchCenterOmega"];
+  if (!searchCenter || !searchCenter.IsMap())
+    throw std::runtime_error(
+        "Missing or invalid YAML mapping: EigenSolver.SearchCenterOmega");
+  recipe.searchCenterOmega = {required<double>(searchCenter, "Real"),
+                              required<double>(searchCenter, "Imag")};
+  recipe.numberOfEigenvalues =
+      required<int>(eigenSolver, "NumberOfEigenvalues");
+  recipe.eigenTolerance = required<double>(eigenSolver, "Tolerance");
+  recipe.eigenMaximumIterations =
+      required<int>(eigenSolver, "MaximumIterations");
+
+  const YAML::Node output = root["Output"];
+  if (!output || !output.IsMap())
+    throw std::runtime_error("Missing or invalid YAML mapping: Output");
+  const std::filesystem::path configuredOutput =
+      required<std::string>(output, "File");
+  recipe.outputFile = (configuredOutput.is_absolute()
+                           ? configuredOutput
+                           : configPath.parent_path() / configuredOutput)
+                          .lexically_normal()
+                          .string();
+
   const YAML::Node physics = root["Physics"];
   const YAML::Node targets = physics["Targets"];
   const YAML::Node gas = physics["Gas"];
@@ -89,6 +117,11 @@ Recipe Parser::parseOnRoot(const std::string &yamlConfig) {
   }
   requireFinite(recipe.alpha.real(), "Stability.Alpha.Real");
   requireFinite(recipe.alpha.imag(), "Stability.Alpha.Imag");
+  requireFinite(recipe.searchCenterOmega.real(),
+                "EigenSolver.SearchCenterOmega.Real");
+  requireFinite(recipe.searchCenterOmega.imag(),
+                "EigenSolver.SearchCenterOmega.Imag");
+  requireFinite(recipe.eigenTolerance, "EigenSolver.Tolerance");
   requireFinite(recipe.reynolds, "ReynoldsNumber");
   requireFinite(recipe.mach, "MachNumber");
   requireFinite(recipe.prandtl, "PrandtlNumber");
@@ -104,6 +137,11 @@ Recipe Parser::parseOnRoot(const std::string &yamlConfig) {
       recipe.sutherlandConstant < 0.0) {
     throw std::runtime_error("The physical parameters in config.yaml are "
                              "outside their valid ranges");
+  }
+  if (recipe.numberOfEigenvalues <= 0 || recipe.eigenTolerance <= 0.0 ||
+      recipe.eigenMaximumIterations <= 0) {
+    throw std::runtime_error(
+        "EigenSolver counts, tolerance, and iteration limit must be positive");
   }
 
   return recipe;
@@ -131,7 +169,7 @@ PetscErrorCode Parser::broadcastString(std::string &value) const {
 }
 
 PetscErrorCode Parser::broadcast(Recipe &recipe) const {
-  std::array<double, 10> values{};
+  std::array<double, 13> values{};
   PetscMPIInt rank = 0;
 
   PetscFunctionBeginUser;
@@ -146,21 +184,29 @@ PetscErrorCode Parser::broadcast(Recipe &recipe) const {
               recipe.ratioOfSpecificHeats,
               recipe.referenceViscosity,
               recipe.referenceTemperature,
-              recipe.sutherlandConstant};
+              recipe.sutherlandConstant,
+              recipe.searchCenterOmega.real(),
+              recipe.searchCenterOmega.imag(),
+              recipe.eigenTolerance};
   }
   PetscCallMPI(MPI_Bcast(values.data(), static_cast<PetscMPIInt>(values.size()),
                          MPI_DOUBLE, 0, comm_));
-  std::array<int, 2> qValues{recipe.qY, recipe.qZ};
-  PetscCallMPI(MPI_Bcast(qValues.data(),
-                         static_cast<PetscMPIInt>(qValues.size()), MPI_INT, 0,
-                         comm_));
+  std::array<int, 4> integerValues{recipe.qY, recipe.qZ,
+                                   recipe.numberOfEigenvalues,
+                                   recipe.eigenMaximumIterations};
+  PetscCallMPI(MPI_Bcast(integerValues.data(),
+                         static_cast<PetscMPIInt>(integerValues.size()),
+                         MPI_INT, 0, comm_));
   PetscCall(broadcastString(recipe.caseTitle));
   PetscCall(broadcastString(recipe.sourceFile));
   PetscCall(broadcastString(recipe.inputFile));
+  PetscCall(broadcastString(recipe.outputFile));
 
   if (rank != 0) {
-    recipe.qY = qValues[0];
-    recipe.qZ = qValues[1];
+    recipe.qY = integerValues[0];
+    recipe.qZ = integerValues[1];
+    recipe.numberOfEigenvalues = integerValues[2];
+    recipe.eigenMaximumIterations = integerValues[3];
     recipe.alpha = {values[0], values[1]};
     recipe.mach = values[2];
     recipe.reynolds = values[3];
@@ -170,6 +216,8 @@ PetscErrorCode Parser::broadcast(Recipe &recipe) const {
     recipe.referenceViscosity = values[7];
     recipe.referenceTemperature = values[8];
     recipe.sutherlandConstant = values[9];
+    recipe.searchCenterOmega = {values[10], values[11]};
+    recipe.eigenTolerance = values[12];
   }
   PetscFunctionReturn(PETSC_SUCCESS);
 }

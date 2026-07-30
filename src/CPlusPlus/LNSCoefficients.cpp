@@ -18,10 +18,12 @@ constexpr PetscReal oneThird = 1.0 / 3.0;
 constexpr PetscReal twoThirds = 2.0 / 3.0;
 constexpr PetscReal fourThirds = 4.0 / 3.0;
 
+/** @brief Return one named component from a five-variable real state. */
 PetscReal component(const FlowState &state, FlowComponent field) {
   return state[static_cast<std::size_t>(flowIndex(field))];
 }
 
+/** @brief Test that all values in a real flow tuple are finite. */
 bool finiteState(const FlowState &state) {
   return std::all_of(state.begin(), state.end(), [](PetscReal value) {
     return !PetscIsInfOrNanReal(value);
@@ -48,6 +50,10 @@ bool PhysicalLNSCoefficients::finite() const noexcept {
   return Gamma.finite() && A.finite() && B.finite() && C.finite() &&
          D.finite() && Vxx.finite() && Vxy.finite() && Vxz.finite() &&
          Vyy.finite() && Vyz.finite() && Vzz.finite();
+}
+
+bool InviscidLNSCoefficients::finite() const noexcept {
+  return Gamma.finite() && Bc.finite() && Cc.finite();
 }
 
 const char *coefficientStatusName(CoefficientStatus status) noexcept {
@@ -108,6 +114,61 @@ LNSCoefficients::LNSCoefficients(const Recipe &recipe)
       gamma_(recipe.ratioOfSpecificHeats),
       sutherlandRatio_(recipe.sutherlandConstant /
                        recipe.referenceTemperature) {}
+
+CoefficientStatus LNSCoefficients::evaluateInviscid(
+    const BaseFlowPoint &flow,
+    InviscidLNSCoefficients &coefficients) const noexcept {
+  if (!finiteState(flow.value))
+    return CoefficientStatus::NonFiniteInput;
+
+  const PetscReal rho = component(flow.value, FlowComponent::Density);
+  const PetscReal V = component(flow.value, FlowComponent::V);
+  const PetscReal W = component(flow.value, FlowComponent::W);
+  const PetscReal T = component(flow.value, FlowComponent::Temperature);
+  if (rho <= 0.0)
+    return CoefficientStatus::NonPositiveDensity;
+  if (T <= 0.0)
+    return CoefficientStatus::NonPositiveTemperature;
+
+  const PetscReal Pe = 1.0 / (gamma_ * mach_ * mach_);
+  const PetscReal g2 = 1.0 / ((gamma_ - 1.0) * mach_ * mach_);
+
+  coefficients = {};
+  auto &G = coefficients.Gamma;
+  auto &Bc = coefficients.Bc;
+  auto &Cc = coefficients.Cc;
+
+  G(0, 0) = 1.0;
+  G(1, 1) = rho;
+  G(2, 2) = rho;
+  G(3, 3) = rho;
+  G(4, 0) = -Pe * T;
+  G(4, 4) = rho * g2 - Pe * rho;
+
+  Bc(0, 0) = V;
+  Bc(0, 2) = rho;
+  Bc(1, 1) = rho * V;
+  Bc(2, 0) = Pe * T;
+  Bc(2, 2) = rho * V;
+  Bc(2, 4) = Pe * rho;
+  Bc(3, 3) = rho * V;
+  Bc(4, 0) = -Pe * V * T;
+  Bc(4, 4) = rho * V * g2 - rho * V * Pe;
+
+  Cc(0, 0) = W;
+  Cc(0, 3) = rho;
+  Cc(1, 1) = rho * W;
+  Cc(2, 2) = rho * W;
+  Cc(3, 0) = Pe * T;
+  Cc(3, 3) = rho * W;
+  Cc(3, 4) = Pe * rho;
+  Cc(4, 0) = -Pe * W * T;
+  Cc(4, 4) = rho * W * g2 - rho * W * Pe;
+
+  if (!coefficients.finite())
+    return CoefficientStatus::NonFiniteOutput;
+  return CoefficientStatus::Success;
+}
 
 CoefficientStatus LNSCoefficients::evaluate(
     const BaseFlowPoint &flow,

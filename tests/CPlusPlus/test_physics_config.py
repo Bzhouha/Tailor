@@ -1,3 +1,5 @@
+"""Collective parser tests for physical and eigensolver YAML values."""
+
 from __future__ import annotations
 
 import argparse
@@ -10,6 +12,7 @@ import yaml
 
 
 def fdq_path(config_path: Path, config: dict) -> Path:
+    """Resolve a prepared FD-q path using parsed YAML values."""
     source = Path(config["File"])
     if not source.is_absolute():
         source = config_path.parent / Path(config["Folder"]) / source
@@ -27,7 +30,13 @@ def run(
     config: Path,
     mpiexec: Path | None,
 ) -> subprocess.CompletedProcess[str]:
-    command = [str(solver), "-c", str(config)]
+    """Run the assemble-only solver in serial or on two ranks."""
+    command = [
+        str(solver),
+        "-c",
+        str(config),
+        "-tailor_assemble_only",
+    ]
     if mpiexec is not None:
         command = [str(mpiexec), "-n", "2", *command]
     return subprocess.run(
@@ -48,6 +57,7 @@ def create_case(
     key: str | None = None,
     value: float | None = None,
 ) -> Path:
+    """Copy a case and optionally replace one nested physics value."""
     case = root / "case"
     case.mkdir(parents=True)
     target_config_path = case / "config.yaml"
@@ -71,6 +81,7 @@ def create_case(
 
 
 def main() -> int:
+    """Exercise accepted and rejected physical values collectively."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--solver", required=True, type=Path)
     parser.add_argument("--config", required=True, type=Path)

@@ -1,3 +1,5 @@
+"""Unit tests for bounded/periodic FD-q rules and their HDF5 caches."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,10 +11,12 @@ import numpy as np
 
 from src.Python.fdq_nodes import (
     calculate_fdq_nodes,
+    calculate_periodic_fdq_rule,
     calculate_fdq_rule,
     fornberg_weights,
     load_fdq_rule,
     load_or_create_fdq_rule,
+    load_or_create_periodic_fdq_rule,
     save_fdq_rule,
 )
 
@@ -24,7 +28,11 @@ NOTEBOOK_N100_Q10 = np.asarray(
 
 
 class FDQNodeTests(unittest.TestCase):
+    """Verify node generation, topology, and derivative convergence."""
+
     def test_parameter_validation(self) -> None:
+        """Reject non-integral and out-of-range bounded parameters."""
+
         for N, q, exception in [
             (True, 2, TypeError),
             (4, False, TypeError),
@@ -38,6 +46,8 @@ class FDQNodeTests(unittest.TestCase):
                 calculate_fdq_nodes(N, q)
 
     def test_even_q_rule_shapes_and_invariants(self) -> None:
+        """Check bounded rule shapes, endpoints, symmetry, and equal error."""
+
         rule = calculate_fdq_rule(10, 4)
         self.assertEqual(rule.nodes.shape, (11,))
         self.assertEqual(rule.stencil_indices.shape, (11, 5))
@@ -50,20 +60,63 @@ class FDQNodeTests(unittest.TestCase):
         self.assertLess(np.max(np.abs(np.diff(rule.log_error))), 1.0e-9)
 
     def test_full_stencil_limit_is_cgl(self) -> None:
+        """Recover Chebyshev--Gauss--Lobatto nodes for a full stencil."""
+
         N = 8
         nodes = calculate_fdq_nodes(N, N)
         expected = -np.cos(np.arange(N + 1, dtype=np.float64) * np.pi / N)
         np.testing.assert_allclose(nodes, expected, rtol=0.0, atol=2.0e-11)
 
     def test_notebook_n100_q10_reference(self) -> None:
+        """Match the original N=100, q=10 notebook reference nodes."""
+
         nodes = calculate_fdq_nodes(100, 10)
         np.testing.assert_allclose(
             nodes, NOTEBOOK_N100_Q10, rtol=0.0, atol=2.0e-9
         )
 
+    def test_periodic_rule_is_half_open_and_wraps(self) -> None:
+        """Check half-open nodes and centered wrap-around indices."""
+
+        rule = calculate_periodic_fdq_rule(10, 4)
+        self.assertEqual(rule.topology, "periodic")
+        self.assertEqual(rule.node_count, 10)
+        self.assertEqual(rule.nodes[0], -1.0)
+        self.assertLess(rule.nodes[-1], 1.0)
+        np.testing.assert_array_equal(
+            rule.stencil_offsets[0], np.asarray([-2, -1, 0, 1, 2])
+        )
+        np.testing.assert_array_equal(
+            rule.stencil_indices[0], np.asarray([8, 9, 0, 1, 2])
+        )
+
+    def test_periodic_rule_rejects_odd_degree(self) -> None:
+        """Require an even degree for centered periodic stencils."""
+
+        with self.assertRaisesRegex(ValueError, "even"):
+            calculate_periodic_fdq_rule(10, 3)
+
+    def test_periodic_trigonometric_derivatives_converge(self) -> None:
+        """Verify high-order convergence on a smooth periodic function."""
+
+        errors: list[float] = []
+        for node_count in (24, 48):
+            rule = calculate_periodic_fdq_rule(node_count, 6)
+            values = np.sin(np.pi * rule.nodes)
+            sampled = values[rule.stencil_indices]
+            derivative = np.sum(rule.weights[1] * sampled, axis=1)
+            errors.append(
+                float(np.max(np.abs(derivative - np.pi * np.cos(np.pi * rule.nodes))))
+            )
+        self.assertLess(errors[1], errors[0] / 40.0)
+
 
 class FornbergTests(unittest.TestCase):
+    """Verify the standalone Fornberg weight recursion."""
+
     def test_polynomial_exactness_through_stencil_degree(self) -> None:
+        """Differentiate all representable monomials exactly."""
+
         stencil = np.asarray([-1.0, -0.7, -0.1, 0.4, 1.0])
         x0 = -0.1
         weights = fornberg_weights(x0, stencil, 2)
@@ -81,21 +134,29 @@ class FornbergTests(unittest.TestCase):
                     self.assertAlmostEqual(approximation, expected, places=11)
 
     def test_rejects_duplicate_stencil_nodes(self) -> None:
+        """Reject singular stencils containing duplicate coordinates."""
+
         with self.assertRaisesRegex(ValueError, "distinct"):
             fornberg_weights(0.0, np.asarray([-1.0, 0.0, 0.0, 1.0]))
 
 
 class FDQCacheTests(unittest.TestCase):
+    """Verify schema-v2 cache serialization and automatic regeneration."""
+
     def test_hdf5_round_trip_and_schema(self) -> None:
+        """Round-trip a bounded rule with complete schema metadata."""
+
         rule = calculate_fdq_rule(8, 4)
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "custom.h5"
             saved = save_fdq_rule(rule, path)
             self.assertEqual(saved, path.resolve())
             with h5py.File(path, "r") as handle:
-                self.assertEqual(int(handle.attrs["schema_version"]), 1)
+                self.assertEqual(int(handle.attrs["schema_version"]), 2)
                 self.assertEqual(int(handle.attrs["N"]), 8)
                 self.assertEqual(int(handle.attrs["q"]), 4)
+                self.assertEqual(handle.attrs["topology"], "bounded")
+                self.assertIn("stencil_offsets", handle)
                 self.assertIn("weights/d0", handle)
                 self.assertIn("weights/d1", handle)
                 self.assertIn("weights/d2", handle)
@@ -110,6 +171,8 @@ class FDQCacheTests(unittest.TestCase):
             )
 
     def test_load_or_create_uses_named_cache(self) -> None:
+        """Use the canonical ``N*_q*.h5`` bounded cache name."""
+
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             created = load_or_create_fdq_rule(6, 3, directory)
@@ -118,7 +181,34 @@ class FDQCacheTests(unittest.TestCase):
             loaded = load_or_create_fdq_rule(6, 3, directory)
             np.testing.assert_allclose(loaded.nodes, created.nodes)
 
+    def test_stale_cache_is_rebuilt_automatically(self) -> None:
+        """Replace an unreadable stale cache without user intervention."""
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            path = directory / "N6_q3.h5"
+            path.touch()
+            rule = load_or_create_fdq_rule(6, 3, directory)
+            self.assertEqual(rule.topology, "bounded")
+            with h5py.File(path, "r") as handle:
+                self.assertEqual(int(handle.attrs["schema_version"]), 2)
+
+    def test_periodic_cache_round_trip(self) -> None:
+        """Use and round-trip the periodic ``N*_q*p.h5`` cache."""
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            created = load_or_create_periodic_fdq_rule(12, 4, directory)
+            path = directory / "N12_q4p.h5"
+            self.assertTrue(path.is_file())
+            loaded = load_or_create_periodic_fdq_rule(12, 4, directory)
+            np.testing.assert_array_equal(
+                loaded.stencil_offsets, created.stencil_offsets
+            )
+
     def test_rejects_wrong_schema_version(self) -> None:
+        """Reject a directly loaded cache with an unsupported schema."""
+
         rule = calculate_fdq_rule(6, 3)
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "bad.h5"

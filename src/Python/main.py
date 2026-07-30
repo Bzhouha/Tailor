@@ -19,14 +19,23 @@ DEFAULT_PETSC_PREFIX = PROJECT_ROOT.parent / "petsc" / "arch-complex"
 
 @dataclass(frozen=True, slots=True)
 class CaseConfiguration:
+    """Resolved paths and polynomial degrees needed by preprocessing."""
+
+    #: Absolute YAML configuration path.
     config_path: Path
+    #: Absolute source-flow HDF5 path.
     source_h5: Path
+    #: Absolute prepared FD-q HDF5 path.
     output_h5: Path
+    #: Bounded xi-direction polynomial degree.
     q_y: int
+    #: Periodic eta-direction polynomial degree.
     q_z: int
 
 
 def _parser() -> argparse.ArgumentParser:
+    """Construct the command-line parser for the Python driver."""
+
     parser = argparse.ArgumentParser(
         prog="Tailor.py",
         description=(
@@ -79,6 +88,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _required_mapping(root: dict[str, Any], key: str) -> dict[str, Any]:
+    """Return a required YAML mapping or raise a descriptive error."""
+
     value = root.get(key)
     if not isinstance(value, dict):
         raise ValueError(f"YAML key {key!r} must be a mapping")
@@ -86,6 +97,8 @@ def _required_mapping(root: dict[str, Any], key: str) -> dict[str, Any]:
 
 
 def _required_string(root: dict[str, Any], key: str) -> str:
+    """Return a required non-empty YAML string."""
+
     value = root.get(key)
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"YAML key {key!r} must be a non-empty string")
@@ -93,6 +106,8 @@ def _required_string(root: dict[str, Any], key: str) -> str:
 
 
 def _required_q_value(root: dict[str, Any], key: str) -> int:
+    """Return and validate one polynomial degree from ``Q-Value``."""
+
     value = root.get(key)
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(f"Q-Value.{key} must be an integer polynomial degree")
@@ -132,6 +147,8 @@ def load_case_configuration(path: Path | str) -> CaseConfiguration:
 
 
 def _executable(path: Path | str, description: str) -> Path:
+    """Resolve and validate an executable file."""
+
     candidate = Path(path).expanduser().resolve()
     if not candidate.is_file():
         raise FileNotFoundError(f"{description} does not exist: {candidate}")
@@ -212,6 +229,8 @@ def solver_command(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run preprocessing and, unless requested otherwise, launch C++."""
+
     parser = _parser()
     arguments = parser.parse_args(argv)
     try:

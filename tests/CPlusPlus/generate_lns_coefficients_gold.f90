@@ -1,3 +1,5 @@
+!> @file generate_lns_coefficients_gold.f90
+!! @brief Generate trusted LNS coefficient fixtures from the reference formulas.
 program generate_lns_coefficients_gold
   implicit none
   integer, parameter :: dp = kind(1.0d0)
@@ -46,6 +48,9 @@ program generate_lns_coefficients_gold
 
 contains
 
+!> @brief Evaluate all eleven physical-space LNS coefficient matrices.
+!! @param[in] q Base-flow state and derivatives at one point.
+!! @param[out] matrices Gamma, A, B, C, D, and six viscous matrices.
 subroutine get_unadorned(q, matrices)
   implicit none
   real(dp), intent(in) :: q(5,10)

@@ -27,9 +27,13 @@ public:
   PetscErrorCode parse(const std::string &yamlConfig, Recipe &recipe) const;
 
 private:
+  /** @brief Parse and validate YAML on rank zero. */
   static Recipe parseOnRoot(const std::string &yamlConfig);
+  /** @brief Broadcast all scalar and string recipe fields. */
   PetscErrorCode broadcast(Recipe &recipe) const;
+  /** @brief Broadcast one variable-length string from rank zero. */
   PetscErrorCode broadcastString(std::string &value) const;
 
+  /** Communicator receiving identical validated configuration data. */
   MPI_Comm comm_;
 };

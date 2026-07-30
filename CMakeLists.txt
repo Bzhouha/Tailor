@@ -77,7 +77,10 @@ endfunction()
 
 add_library(tailor_core STATIC
     src/CPlusPlus/BaseFlowDerivatives.cpp
+    src/CPlusPlus/BoundaryConditions.cpp
     src/CPlusPlus/CurvilinearTransform.cpp
+    src/CPlusPlus/EigenSolver.cpp
+    src/CPlusPlus/EigenOutput.cpp
     src/CPlusPlus/GlobalOperator.cpp
     src/CPlusPlus/LNSCoefficients.cpp
     src/CPlusPlus/Metrics.cpp
@@ -92,7 +95,9 @@ target_include_directories(tailor_core PUBLIC
 target_link_libraries(tailor_core PUBLIC
     PkgConfig::SLEPC
     yaml-cpp::yaml-cpp
-    "${TAILOR_PETSC_HDF5_LIBRARY}")
+    "${TAILOR_PETSC_HDF5_LIBRARY}"
+    lapack
+    blas)
 tailor_enable_warnings(tailor_core)
 
 add_executable(tailor
@@ -173,12 +178,27 @@ if(BUILD_TESTING)
     target_link_libraries(test_global_operator PRIVATE tailor_core)
     tailor_enable_warnings(test_global_operator)
 
+    add_executable(test_boundary_conditions
+        tests/CPlusPlus/test_boundary_conditions.cpp)
+    target_link_libraries(test_boundary_conditions PRIVATE tailor_core)
+    tailor_enable_warnings(test_boundary_conditions)
+
+    add_executable(test_eigen_solver
+        tests/CPlusPlus/test_eigen_solver.cpp)
+    target_link_libraries(test_eigen_solver PRIVATE tailor_core)
+    tailor_enable_warnings(test_eigen_solver)
+
+    add_test(NAME tailor_eigen_solver_small
+        COMMAND test_eigen_solver)
+
     if(EXISTS "${TAILOR_TEST_CONFIG}")
         add_test(NAME tailor_smoke_serial
-            COMMAND tailor -c "${TAILOR_TEST_CONFIG}")
+            COMMAND tailor -c "${TAILOR_TEST_CONFIG}"
+                    -tailor_assemble_only)
         add_test(NAME tailor_smoke_mpi_2
             COMMAND "${TAILOR_PETSC_PREFIX}/bin/mpiexec" -n 2
-                    $<TARGET_FILE:tailor> -c "${TAILOR_TEST_CONFIG}")
+                    $<TARGET_FILE:tailor> -c "${TAILOR_TEST_CONFIG}"
+                    -tailor_assemble_only)
         add_test(NAME tailor_lns_coefficients_serial
             COMMAND test_lns_coefficients
                     -c "${TAILOR_TEST_CONFIG}"
@@ -203,6 +223,13 @@ if(BUILD_TESTING)
         add_test(NAME tailor_global_operator_mpi_2
             COMMAND "${TAILOR_PETSC_PREFIX}/bin/mpiexec" -n 2
                     $<TARGET_FILE:test_global_operator>
+                    -c "${TAILOR_TEST_CONFIG}")
+        add_test(NAME tailor_boundary_conditions_serial
+            COMMAND test_boundary_conditions
+                    -c "${TAILOR_TEST_CONFIG}")
+        add_test(NAME tailor_boundary_conditions_mpi_2
+            COMMAND "${TAILOR_PETSC_PREFIX}/bin/mpiexec" -n 2
+                    $<TARGET_FILE:test_boundary_conditions>
                     -c "${TAILOR_TEST_CONFIG}")
         if(EXISTS "${TAILOR_TEST_PYTHON}")
             add_test(NAME tailor_fdq_invalid_inputs
@@ -237,6 +264,20 @@ if(BUILD_TESTING)
                         --mpiexec "${TAILOR_PETSC_PREFIX}/bin/mpiexec")
             set_tests_properties(tailor_physics_config
                 PROPERTIES TIMEOUT 180)
+            add_test(NAME tailor_boundary_uniform
+                COMMAND "${TAILOR_TEST_PYTHON}"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/tests/CPlusPlus/test_boundary_uniform.py"
+                        --test-binary $<TARGET_FILE:test_boundary_conditions>
+                        --config "${TAILOR_TEST_CONFIG}"
+                        --mpiexec "${TAILOR_PETSC_PREFIX}/bin/mpiexec")
+            set_tests_properties(tailor_boundary_uniform
+                PROPERTIES TIMEOUT 180)
+            add_test(NAME tailor_eigen_output
+                COMMAND "${TAILOR_TEST_PYTHON}"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/tests/CPlusPlus/test_eigen_output.py"
+                        --test-binary $<TARGET_FILE:test_eigen_solver>)
+            set_tests_properties(tailor_eigen_output
+                PROPERTIES TIMEOUT 120)
         else()
             message(STATUS
                 "TAILOR_TEST_PYTHON does not exist; skipping malformed FD-q tests: "

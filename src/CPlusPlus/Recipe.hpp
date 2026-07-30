@@ -46,4 +46,16 @@ struct Recipe {
 
   /** Complex streamwise wavenumber in the Fourier ansatz. */
   std::complex<double> alpha{};
+
+  /** Complex frequency whose mapped lambda value is the local search target. */
+  std::complex<double> searchCenterOmega{};
+  /** Number of eigenpairs requested from the local spectrum. */
+  int numberOfEigenvalues = 0;
+  /** Relative convergence tolerance for SLEPc. */
+  double eigenTolerance = 0.0;
+  /** Maximum number of Krylov iterations. */
+  int eigenMaximumIterations = 0;
+
+  /** Final self-contained HDF5 eigenmode file. */
+  std::string outputFile;
 };

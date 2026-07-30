@@ -14,15 +14,25 @@
 
 /** @brief First- and second-order inverse mapping metrics at one grid point. */
 struct MetricPoint {
+  /** First inverse derivative \f$\xi_y\f$. */
   PetscReal xiY = 0.0;
+  /** First inverse derivative \f$\xi_z\f$. */
   PetscReal xiZ = 0.0;
+  /** First inverse derivative \f$\eta_y\f$. */
   PetscReal etaY = 0.0;
+  /** First inverse derivative \f$\eta_z\f$. */
   PetscReal etaZ = 0.0;
+  /** Second inverse derivative \f$\xi_{yy}\f$. */
   PetscReal xiYY = 0.0;
+  /** Second inverse derivative \f$\xi_{zz}\f$. */
   PetscReal xiZZ = 0.0;
+  /** Mixed inverse derivative \f$\xi_{yz}\f$. */
   PetscReal xiYZ = 0.0;
+  /** Second inverse derivative \f$\eta_{yy}\f$. */
   PetscReal etaYY = 0.0;
+  /** Second inverse derivative \f$\eta_{zz}\f$. */
   PetscReal etaZZ = 0.0;
+  /** Mixed inverse derivative \f$\eta_{yz}\f$. */
   PetscReal etaYZ = 0.0;
 
   /** @brief Test that every metric value is finite. */
@@ -49,12 +59,19 @@ struct MetricPoint {
  * \f]
  */
 struct CurvilinearLNSCoefficients {
+  /** Generalized time/mass block. */
   Block5 Gamma;
+  /** Zeroth-order transformed block. */
   Block5 K0;
+  /** Computational-xi first-derivative block. */
   Block5 Kxi;
+  /** Computational-eta first-derivative block. */
   Block5 Keta;
+  /** Computational-xi pure second-derivative block. */
   Block5 Vxixi;
+  /** Computational mixed second-derivative block. */
   Block5 Vxieta;
+  /** Computational-eta pure second-derivative block. */
   Block5 Vetaeta;
 
   /** @brief Test that all seven coefficient blocks are finite. */

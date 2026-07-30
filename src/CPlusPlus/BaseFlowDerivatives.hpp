@@ -96,12 +96,16 @@ public:
                          BaseFlowDerivativeDiagnostics &diagnostics) const;
 
 private:
+  /** @brief Create the compatible 25-DOF derivative DMDA and vector. */
   PetscErrorCode createStorage(ProblemData &data) const;
+  /** @brief Differentiate and transform every locally owned node. */
   PetscErrorCode
   computeValues(ProblemData &data,
                 BaseFlowDerivativeDiagnostics &diagnostics) const;
+  /** @brief Compute global two-norms for all stored components. */
   PetscErrorCode computeNorms(const ProblemData &data,
                               BaseFlowDerivativeDiagnostics &diagnostics) const;
 
+  /** Communicator used for collective validation and reductions. */
   MPI_Comm comm_;
 };

@@ -1,3 +1,5 @@
+"""MPI integration tests for curvilinear metric computation."""
+
 from __future__ import annotations
 
 import argparse
@@ -29,6 +31,7 @@ Mutation = Callable[[h5py.File], None]
 
 
 def fdq_path(config_path: Path) -> Path:
+    """Resolve the prepared FD-q file associated with a test config."""
     with config_path.open("r", encoding="utf-8") as stream:
         config = yaml.safe_load(stream)
     folder = Path(config["Folder"])
@@ -47,16 +50,28 @@ def fdq_path(config_path: Path) -> Path:
 def differentiate_xi(
     values: np.ndarray, indices: np.ndarray, weights: np.ndarray
 ) -> np.ndarray:
+    """Apply the bounded xi first-derivative rule."""
     return np.einsum("jis,is->ji", values[:, indices], weights)
 
 
 def differentiate_eta(
-    values: np.ndarray, indices: np.ndarray, weights: np.ndarray
+    values: np.ndarray,
+    indices: np.ndarray,
+    offsets: np.ndarray,
+    weights: np.ndarray,
+    translation: float = 0.0,
 ) -> np.ndarray:
-    return np.einsum("jsi,js->ji", values[indices, :], weights)
+    """Apply the periodic eta rule with optional affine unwrapping."""
+    sampled = values[indices, :]
+    if translation != 0.0:
+        rows = np.arange(indices.shape[0], dtype=np.int64)[:, None]
+        wraps = (rows + offsets - indices) // indices.shape[0]
+        sampled = sampled + wraps[:, :, None] * translation
+    return np.einsum("jsi,js->ji", sampled, weights)
 
 
 def reference_metrics(path: Path) -> tuple[tuple[float, float], np.ndarray]:
+    """Compute Jacobian extrema and ten metric norms independently."""
     with h5py.File(path, "r") as handle:
         ny = int(handle.attrs["Ny"])
         nz = int(handle.attrs["Nz"])
@@ -72,6 +87,10 @@ def reference_metrics(path: Path) -> tuple[tuple[float, float], np.ndarray]:
         eta_indices = np.asarray(
             handle["discretization/z/stencil_indices"], dtype=np.int64
         )
+        eta_offsets = np.asarray(
+            handle["discretization/z/stencil_offsets"], dtype=np.int64
+        )
+        spanwise_period = float(handle.attrs["spanwise_period"])
         xi_weights = np.asarray(
             handle["discretization/y/weights/d1"], dtype=np.float64
         )
@@ -80,9 +99,15 @@ def reference_metrics(path: Path) -> tuple[tuple[float, float], np.ndarray]:
         )
 
     y_xi = differentiate_xi(y, xi_indices, xi_weights)
-    y_eta = differentiate_eta(y, eta_indices, eta_weights)
+    y_eta = differentiate_eta(y, eta_indices, eta_offsets, eta_weights)
     z_xi = differentiate_xi(z, xi_indices, xi_weights)
-    z_eta = differentiate_eta(z, eta_indices, eta_weights)
+    z_eta = differentiate_eta(
+        z,
+        eta_indices,
+        eta_offsets,
+        eta_weights,
+        translation=spanwise_period,
+    )
     jacobian = y_xi * z_eta - y_eta * z_xi
 
     xi_y = z_eta / jacobian
@@ -91,7 +116,9 @@ def reference_metrics(path: Path) -> tuple[tuple[float, float], np.ndarray]:
     eta_z = y_xi / jacobian
 
     dxi = lambda values: differentiate_xi(values, xi_indices, xi_weights)
-    deta = lambda values: differentiate_eta(values, eta_indices, eta_weights)
+    deta = lambda values: differentiate_eta(
+        values, eta_indices, eta_offsets, eta_weights
+    )
     metrics = (
         xi_y,
         xi_z,
@@ -111,7 +138,13 @@ def reference_metrics(path: Path) -> tuple[tuple[float, float], np.ndarray]:
 def solver_command(
     solver: Path, config: Path, mpiexec: Path | None
 ) -> list[str]:
-    command = [str(solver), "-c", str(config)]
+    """Build an assemble-only serial or two-rank solver command."""
+    command = [
+        str(solver),
+        "-c",
+        str(config),
+        "-tailor_assemble_only",
+    ]
     if mpiexec is not None:
         command = [str(mpiexec), "-n", "2", *command]
     return command
@@ -120,6 +153,7 @@ def solver_command(
 def run_solver(
     solver: Path, config: Path, mpiexec: Path | None
 ) -> subprocess.CompletedProcess[str]:
+    """Run one metric scenario and capture combined output."""
     return subprocess.run(
         solver_command(solver, config, mpiexec),
         text=True,
@@ -131,6 +165,7 @@ def run_solver(
 
 
 def parse_diagnostics(output: str) -> tuple[tuple[float, float], np.ndarray]:
+    """Extract Jacobian extrema and metric norms from solver output."""
     jacobian_match = re.search(
         r"Jacobian range: \[([^,]+), ([^\]]+)\]", output
     )
@@ -155,6 +190,7 @@ def assert_successful_metrics(
     mpiexec: Path | None,
     scenario: str,
 ) -> None:
+    """Compare C++ metric diagnostics with the Python reference."""
     completed = run_solver(solver, config, mpiexec)
     if completed.returncode != 0:
         raise AssertionError(
@@ -185,6 +221,7 @@ def create_case(
     source_fdq: Path,
     mutation: Mutation,
 ) -> Path:
+    """Copy and mutate a prepared case for one regression scenario."""
     case = root / "case"
     case.mkdir(parents=True)
     target_config = case / "config.yaml"
@@ -198,35 +235,45 @@ def create_case(
 
 
 def make_skewed_curved_grid(handle: h5py.File) -> None:
+    """Install a nontrivial periodic curved grid."""
     xi = np.asarray(handle["discretization/y/nodes"])
     eta = np.asarray(handle["discretization/z/nodes"])
     xi_grid, eta_grid = np.meshgrid(xi, eta, indexing="xy")
     ny = xi.size
     nz = eta.size
+    period = float(handle.attrs["spanwise_period"])
+    theta = 2.0 * np.pi * (eta_grid - eta[0]) / (
+        float(handle["discretization/z"].attrs["period"])
+    )
+    phase = (eta_grid - eta[0]) / float(
+        handle["discretization/z"].attrs["period"]
+    )
     grid = np.asarray(handle["grid"]).reshape(nz, ny, 3, 2)
     grid[:, :, 1, 0] = (
         2.0 * xi_grid
-        + 0.25 * eta_grid
-        + 0.08 * xi_grid * eta_grid
         + 0.03 * xi_grid**2
+        + 0.12 * np.sin(theta)
+        + 0.05 * xi_grid * np.sin(theta)
     )
     grid[:, :, 2, 0] = (
+        period * phase
         -0.15 * xi_grid
-        + 1.7 * eta_grid
-        + 0.05 * xi_grid * eta_grid
-        + 0.04 * eta_grid**2
+        + 0.08 * np.cos(theta)
+        + 0.04 * xi_grid * np.cos(theta)
     )
     grid[:, :, 1:3, 1] = 0.0
     handle["grid"][:] = grid.reshape(ny * nz, 3, 2)
 
 
 def make_degenerate_grid(handle: h5py.File) -> None:
+    """Collapse both physical coordinates to make the Jacobian singular."""
     grid = np.asarray(handle["grid"])
     grid[:, 1:3, :] = 0.0
     handle["grid"][:] = grid
 
 
 def make_complex_grid(handle: h5py.File) -> None:
+    """Inject a non-real physical grid coordinate."""
     grid = np.asarray(handle["grid"])
     grid[:, 1, 1] = 1.0e-6
     handle["grid"][:] = grid
@@ -239,6 +286,7 @@ def assert_collective_failure(
     expected_message: str,
     scenario: str,
 ) -> None:
+    """Require invalid metrics to fail without hanging MPI."""
     completed = run_solver(solver, config, mpiexec)
     if completed.returncode == 0:
         raise AssertionError(f"{scenario}: invalid grid unexpectedly succeeded")
@@ -249,6 +297,7 @@ def assert_collective_failure(
 
 
 def main() -> int:
+    """Run real, manufactured, serial, MPI, and failure scenarios."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--solver", required=True, type=Path)
     parser.add_argument("--config", required=True, type=Path)

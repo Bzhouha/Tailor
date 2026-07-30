@@ -13,10 +13,12 @@
 
 namespace {
 
+/** @brief Test whether an index belongs to a half-open local range. */
 bool inHalfOpenRange(PetscInt value, PetscInt first, PetscInt count) {
   return value >= first && value < first + count;
 }
 
+/** @brief Extract the real part of a validated PETSc scalar. */
 PetscReal realPart(PetscScalar value) { return PetscRealPart(value); }
 
 } // namespace
@@ -104,7 +106,7 @@ PetscErrorCode BaseFlowDerivatives::computeValues(
 
         for (PetscInt xiSlot = 0; xiSlot < data.xiRule.stencilSize();
              ++xiSlot) {
-          const PetscInt column = data.xiRule.stencilIndex(i, xiSlot);
+          const PetscInt column = data.xiRule.localIndex(i, xiSlot);
           if (!inHalfOpenRange(column, gxs, gxm)) {
             stencilAvailable = false;
             continue;
@@ -120,7 +122,7 @@ PetscErrorCode BaseFlowDerivatives::computeValues(
 
         for (PetscInt etaSlot = 0; etaSlot < data.etaRule.stencilSize();
              ++etaSlot) {
-          const PetscInt row = data.etaRule.stencilIndex(j, etaSlot);
+          const PetscInt row = data.etaRule.localIndex(j, etaSlot);
           if (!inHalfOpenRange(row, gys, gym)) {
             stencilAvailable = false;
             continue;
@@ -136,7 +138,7 @@ PetscErrorCode BaseFlowDerivatives::computeValues(
 
         for (PetscInt etaSlot = 0; etaSlot < data.etaRule.stencilSize();
              ++etaSlot) {
-          const PetscInt row = data.etaRule.stencilIndex(j, etaSlot);
+          const PetscInt row = data.etaRule.localIndex(j, etaSlot);
           if (!inHalfOpenRange(row, gys, gym)) {
             stencilAvailable = false;
             continue;
@@ -144,7 +146,7 @@ PetscErrorCode BaseFlowDerivatives::computeValues(
           const PetscReal etaWeight = data.etaRule.weight(1, j, etaSlot);
           for (PetscInt xiSlot = 0; xiSlot < data.xiRule.stencilSize();
                ++xiSlot) {
-            const PetscInt column = data.xiRule.stencilIndex(i, xiSlot);
+            const PetscInt column = data.xiRule.localIndex(i, xiSlot);
             if (!inHalfOpenRange(column, gxs, gxm)) {
               stencilAvailable = false;
               continue;

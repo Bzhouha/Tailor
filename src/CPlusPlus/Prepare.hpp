@@ -28,14 +28,20 @@ public:
   PetscErrorCode initialize(const Recipe &recipe, ProblemData &data) const;
 
 private:
+  /** @brief Load and collectively validate root schema metadata. */
   PetscErrorCode readMetadata(PetscViewer viewer, const Recipe &recipe,
                               ProblemData &data) const;
+  /** @brief Create compatible periodic/nonperiodic DMDAs. */
   PetscErrorCode createDMs(const Recipe &recipe, ProblemData &data) const;
+  /** @brief Load one PETSc natural vector and map it into DMDA ordering. */
   PetscErrorCode loadNaturalVector(PetscViewer viewer, DM dm, const char *name,
                                    Vec *global) const;
+  /** @brief Load persistent grid and base-flow vectors. */
   PetscErrorCode loadFields(PetscViewer viewer, ProblemData &data) const;
+  /** @brief Read, broadcast, and validate both one-dimensional FD-q rules. */
   PetscErrorCode loadDiscretization(PetscViewer viewer, const Recipe &recipe,
                                     ProblemData &data) const;
 
+  /** Communicator used for collective I/O and validation. */
   MPI_Comm comm_;
 };

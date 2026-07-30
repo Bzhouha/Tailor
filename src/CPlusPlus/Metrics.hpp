@@ -39,9 +39,13 @@ inline constexpr std::array<const char *,
 
 /** @brief Global validation data and two-norms for computed metrics. */
 struct MetricDiagnostics {
+  /** Global minimum direct mapping Jacobian. */
   PetscReal minJacobian = 0.0;
+  /** Global maximum direct mapping Jacobian. */
   PetscReal maxJacobian = 0.0;
+  /** Largest imaginary magnitude in physical y/z grid coordinates. */
   PetscReal maxGridImaginary = 0.0;
+  /** Global two-norm of each metric component. */
   std::array<PetscReal, static_cast<std::size_t>(metricComponentCount)> norms{};
 };
 
@@ -66,12 +70,18 @@ public:
                          MetricDiagnostics &diagnostics) const;
 
 private:
+  /** @brief Create the compatible ten-DOF metric DMDA and vector. */
   PetscErrorCode createStorage(ProblemData &data) const;
+  /** @brief Compute direct derivatives, Jacobian, and inverse metrics. */
   PetscErrorCode computeFirstOrder(ProblemData &data,
                                    MetricDiagnostics &diagnostics) const;
+  /** @brief Differentiate first metrics and apply the second-order chain rule.
+   */
   PetscErrorCode computeSecondOrder(ProblemData &data) const;
+  /** @brief Compute global two-norms of all ten metric components. */
   PetscErrorCode computeNorms(const ProblemData &data,
                               MetricDiagnostics &diagnostics) const;
 
+  /** Communicator used for ghost updates and global reductions. */
   MPI_Comm comm_;
 };

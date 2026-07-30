@@ -21,7 +21,9 @@ public:
   PetscErrorCode run() const;
 
 private:
+  /** @brief Read the required ``-c`` configuration path option. */
   PetscErrorCode readConfigPath(std::string &configPath) const;
 
+  /** Communicator shared by every pipeline module. */
   MPI_Comm comm_;
 };
